@@ -1,0 +1,101 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging / build
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-wheel-metadata/
+pip-log.txt
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Caches & test artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache/
+.mypy_cache/
+.pyre/
+.pytype/
+coverage.xml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# -------------------------
+# Flask / App
+# -------------------------
+instance/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# -------------------------
+# Editors / IDEs
+# -------------------------
+.idea/
+.vscode/
+*.code-workspace
+
+# -------------------------
+# OS files
+# -------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# -------------------------
+# Node (in case a frontend folder appears)
+# -------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -------------------------
+# Data (keep folder with placeholders)
+# -------------------------
+/data/
+/data/*
+!/data/.gitkeep
+!/data/README.md
+
+# -------------------------
+# Static/build artifacts (optional)
+# -------------------------
+static/*.map

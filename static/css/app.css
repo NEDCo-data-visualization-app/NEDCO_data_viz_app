@@ -1,0 +1,4 @@
+.sticky { position: sticky; top: 1rem; }
+.filter-wrap { max-height: 220px; overflow: auto; border: 1px solid #e9ecef; border-radius: .5rem; padding: .5rem; }
+.filter-wrap label { display:block; }
+.chart-box { height: 280px; }
