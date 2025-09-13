@@ -194,10 +194,10 @@ def index():
 
 @app.route("/chart-data", methods=["GET"])
 def chart_data():
-    """Return JSON (date-bucket, mean(metric)) for current filters with chosen granularity.
-       NaN/Inf values are converted to JSON null so Chart.js can render gaps safely.
     """
-    # use cached DF
+    Return JSON (date-bucket, mean(metric)) for current filters with chosen granularity.
+    Empty resample buckets are dropped to avoid NaN/None in the chart.
+    """
     base = _DF if _DF is not None else load_df()
     base = base.copy(deep=False)
 
@@ -222,44 +222,29 @@ def chart_data():
         freq = "D"
     freq_map = {"D": "D", "W": "W-MON", "M": "M"}  # weekly anchored to Monday
 
-    # Resample to mean
+    # Resample to mean and DROP empty buckets (no NaNs left)
     ts = s.set_index(s[DATE_COL])
-    grp = ts[metric].resample(freq_map[freq], label="left", closed="left").mean().sort_index()
+    grp = (
+        ts[metric]
+        .resample(freq_map[freq], label="left", closed="left")
+        .mean()
+        .dropna()
+        .sort_index()
+    )
 
-    # If no buckets, bail out
+    # If no buckets after dropping NaNs, return empty arrays
     if grp is None or len(grp) == 0:
-        return jsonify({"labels": [], "values": [], "metric_label": metric, "date_col": DATE_COL})
+        return jsonify({"labels": [], "values": [], "metric_label": dict(CHART_METRICS).get(metric, metric), "date_col": DATE_COL})
 
     # Labels
-    if freq == "M":
-        labels = [idx.strftime("%Y-%m") for idx in grp.index]
-    else:
-        labels = [idx.date().isoformat() for idx in grp.index]
+    labels = [idx.strftime("%Y-%m") if freq == "M" else idx.date().isoformat() for idx in grp.index]
 
-    # Values: convert NaN/Inf -> None (JSON null)
-    vals = grp.tolist()
-    values = []
-    for v in vals:
-        if v is None:
-            values.append(None)
-        elif isinstance(v, float):
-            if not math.isfinite(v):  # NaN, +Inf, -Inf
-                values.append(None)
-            else:
-                values.append(float(v))
-        else:
-            # try to coerce any stray types
-            try:
-                values.append(float(v))
-            except Exception:
-                values.append(None)
-
-    # If all nulls, return empty arrays to trigger "no data" UI
-    if not any(v is not None for v in values):
-        return jsonify({"labels": [], "values": [], "metric_label": dict(CHART_METRICS).get(metric, metric), "date_col": DATE_COL})
+    # Values: all finite now; just cast to float
+    values = [float(v) for v in grp.values]
 
     metric_label = dict(CHART_METRICS).get(metric, metric)
     return jsonify({"labels": labels, "values": values, "metric_label": metric_label, "date_col": DATE_COL})
+
 
 
 @app.route("/pie-data", methods=["GET"])
