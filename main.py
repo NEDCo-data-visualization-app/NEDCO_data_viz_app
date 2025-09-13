@@ -22,12 +22,20 @@ CHART_METRICS = [("kwh", "kWh"), ("paymoney", "Pay"), ("ghc", "GHC")]
 def available_chart_metrics(df):
     return [(c, lbl) for c, lbl in CHART_METRICS if c in df.columns]
 
+def clean_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove all rows that contain any NaN values.
+    Returns a new DataFrame without modifying the original.
+    """
+    return df.dropna(how="any").reset_index(drop=True)
+
+
 def load_df():
     """Load parquet once, do one-time preprocessing, keep cached in memory."""
     global _DF
     if _DF is None:
         df = pd.read_parquet(DATA_PATH)
-
+        df = clean_nan_rows(df)
         # One-time mapping
         if "res" in df.columns:
             df["res_mapped"] = df["res"].astype(str).map(RES_MAP).fillna("Unknown")
@@ -300,6 +308,44 @@ def pie_data():
         "metric_label": metric_label,
         "segment": segment_col
     })
+
+
+@app.route("/bar-data", methods=["GET"])
+def bar_data():
+    """
+    Return JSON for a bar chart: sum(metric) grouped by city (loc).
+    """
+    base = _DF if _DF is not None else load_df()
+    base = base.copy(deep=False)
+
+    after_cat  = apply_checkbox_filters(base, request.args)
+    filtered   = apply_date_filter(after_cat, request.args)
+
+    metric = request.args.get("metric", "")
+    city_col = "loc"  # adjust if your city column has a different name
+
+    if not metric or metric not in filtered.columns or city_col not in filtered.columns or filtered.empty:
+        return jsonify({"labels": [], "values": [], "metric_label": metric, "segment": city_col or ""})
+
+    s = filtered.dropna(subset=[city_col]).copy()
+    s[metric] = pd.to_numeric(s[metric], errors="coerce")
+    s = s.dropna(subset=[metric])
+    if s.empty:
+        return jsonify({"labels": [], "values": [], "metric_label": metric, "segment": city_col})
+
+    grp = s.groupby(s[city_col].astype(str))[metric].sum().sort_values(ascending=False)
+
+    labels = grp.index.tolist()
+    values = [float(v) for v in grp.values]
+
+    metric_label = dict(CHART_METRICS).get(metric, metric)
+    return jsonify({
+        "labels": labels,
+        "values": values,
+        "metric_label": metric_label,
+        "segment": city_col
+    })
+
 
 
 

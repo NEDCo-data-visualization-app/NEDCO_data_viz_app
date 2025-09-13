@@ -88,6 +88,41 @@
     });
   }
 
+  // NEW: bar chart (sum by city)
+  function drawBar(series, canvasEl) {
+    if (!window.Chart || !canvasEl) return;
+    const labels = Array.isArray(series?.labels) ? series.labels : [];
+    const values = Array.isArray(series?.values) ? series.values : [];
+    const label  = series?.metric_label || 'Metric';
+
+    if (!labels.length || !values.length) {
+      canvasEl.parentElement.innerHTML = '<div class="text-muted text-center py-4">No city data for current filters.</div>';
+      return;
+    }
+    const ctx = canvasEl.getContext('2d');
+    if (ctx._chart) ctx._chart.destroy();
+
+    ctx._chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{ label, data: values }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { ticks: { autoSkip: false, maxRotation: 60, minRotation: 30 } },
+          y: { beginAtZero: true }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (tt) => `${tt.label}: ${tt.formattedValue}` } }
+        }
+      }
+    });
+  }
+
   // Simple debounce
   function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
@@ -96,6 +131,7 @@
     const freqSelect   = document.getElementById('freqSelect');
     const lineEl       = document.getElementById('lineChart');
     const pieEl        = document.getElementById('pieChart');
+    const barEl        = document.getElementById('barChart'); // NEW
 
     if (!metricSelect || !freqSelect || !lineEl) return;
 
@@ -114,6 +150,13 @@
         const pieUrl = urlWithFilters('/pie-data', { metric });
         const pie    = await fetchJson(pieUrl);
         if (pie) drawPie(pie, pieEl);
+      }
+
+      // Bar chart (sum by city)
+      if (barEl) {
+        const barUrl = urlWithFilters('/bar-data', { metric });
+        const bar    = await fetchJson(barUrl);
+        if (bar) drawBar(bar, barEl);
       }
     }, 100);
 

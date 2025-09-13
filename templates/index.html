@@ -114,6 +114,15 @@
               <div class="chart-box"><canvas id="pieChart"></canvas></div>
             </div>
           </div>
+
+          <!-- NEW: Bar chart by city -->
+          <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+              <h6 class="mb-1">Totals by City</h6>
+              <div class="text-muted small mb-2">Shows the <strong>sum</strong> of the selected metric grouped by city.</div>
+              <div class="chart-box"><canvas id="barChart"></canvas></div>
+            </div>
+          </div>
         {% else %}
           <div class="alert alert-warning mb-3">
             No numeric metrics available to chart for the current dataset.
