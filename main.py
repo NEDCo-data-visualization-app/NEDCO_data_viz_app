@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify
+import os
 import pandas as pd
 from functools import lru_cache
 from typing import Dict, List, Tuple, Union, Optional
@@ -7,40 +8,47 @@ from filter_params import FilterParams
 
 app = Flask(__name__)
 
-DATA_PATH = "data/wkfile_shiny.parquet"
-DATE_COL = "chargedate"
+# ------------------------------ Config ---------------------------------------
+class Config:
+    # You can override these with environment variables
+    DATA_PATH = os.getenv("VOLTA_DATA_PATH", "data/wkfile_shiny.parquet")
+    DATE_COL = os.getenv("VOLTA_DATE_COL", "chargedate")
 
-# Hide these from the checkbox UI
-EXCLUDE_COLS = {
-    "chargedate", "chargedate_str", "month", "month_str", "year",
-    "kwh", "ghc", "paymoney", "res"
-}
+    # Hide these from the checkbox UI
+    EXCLUDE_COLS = {
+        "chargedate", "chargedate_str", "month", "month_str", "year",
+        "kwh", "ghc", "paymoney", "res"
+    }
 
-RES_MAP = {"N-Resid [0]": "Commercial", "Resid [1]": "Residential"}
+    RES_MAP = {"N-Resid [0]": "Commercial", "Resid [1]": "Residential"}
 
-# ---- Centralized metrics & frequency config ---------------------------------
-METRICS: Dict[str, str] = {
-    "kwh": "kWh",
-    "paymoney": "Pay",
-    "ghc": "GHC",
-}
+    # Centralized metrics & frequency config
+    METRICS: Dict[str, str] = {
+        "kwh": "kWh",
+        "paymoney": "Pay",
+        "ghc": "GHC",
+    }
 
-FREQ_RULE: Dict[str, str] = {
-    "D": "D",
-    "W": "W-MON",  # weekly anchored to Monday
-    "M": "M",
-}
+    FREQ_RULE: Dict[str, str] = {
+        "D": "D",
+        "W": "W-MON",  # weekly anchored to Monday
+        "M": "M",
+    }
+
+app.config.from_object(Config)
+# -----------------------------------------------------------------------------
+
 
 def get_metric_label(key: str) -> str:
     """UI label for a metric key; falls back to the key if unknown."""
-    return METRICS.get(key, key)
+    return app.config["METRICS"].get(key, key)
 
 def validate_metric(df: pd.DataFrame, metric: Optional[str]) -> Optional[str]:
     """Return metric if present in df and known, else None."""
     if not metric:
         return None
-    return metric if (metric in df.columns and metric in METRICS) else None
-# -----------------------------------------------------------------------------
+    return metric if (metric in df.columns and metric in app.config["METRICS"]) else None
+
 
 def _parse_date(s: str) -> Optional[date]:
     if not s:
@@ -56,7 +64,7 @@ def build_params(args, base_df: pd.DataFrame) -> FilterParams:
     # collect categorical selections for every non-excluded column
     selections: Dict[str, List[str]] = {}
     for c in base_df.columns:
-        if c in EXCLUDE_COLS:
+        if c in app.config["EXCLUDE_COLS"]:
             continue
         vals = args.getlist(c)
         if vals:
@@ -77,7 +85,7 @@ def build_params(args, base_df: pd.DataFrame) -> FilterParams:
     )
 
 def available_chart_metrics(df: pd.DataFrame) -> List[Tuple[str, str]]:
-    return [(k, v) for k, v in METRICS.items() if k in df.columns]
+    return [(k, v) for k, v in app.config["METRICS"].items() if k in df.columns]
 
 def clean_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -89,7 +97,13 @@ def clean_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
 @lru_cache(maxsize=1)
 def load_df() -> pd.DataFrame:
     """Load parquet once, do one-time preprocessing, cache result in-memory."""
-    df = pd.read_parquet(DATA_PATH)
+    path = app.config["DATA_PATH"]
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"DATA_PATH not found: {path}. Set VOLTA_DATA_PATH to override."
+        )
+
+    df = pd.read_parquet(path)
 
     # Drop duplicate rows (keep first occurrence)
     df = df.drop_duplicates().reset_index(drop=True)
@@ -99,15 +113,16 @@ def load_df() -> pd.DataFrame:
 
     # One-time mapping
     if "res" in df.columns:
-        df["res_mapped"] = df["res"].astype(str).map(RES_MAP).fillna("Unknown")
+        df["res_mapped"] = df["res"].astype(str).map(app.config["RES_MAP"]).fillna("Unknown")
 
     # One-time date parsing
-    if DATE_COL in df.columns and not pd.api.types.is_datetime64_any_dtype(df[DATE_COL]):
+    date_col = app.config["DATE_COL"]
+    if date_col in df.columns and not pd.api.types.is_datetime64_any_dtype(df[date_col]):
         # adjust format if needed
-        df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors="coerce", format="%d-%b-%y")
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce", format="%d-%b-%y")
 
     # One-time numeric coercion so stats/charts work
-    for numcol in METRICS.keys():
+    for numcol in app.config["METRICS"].keys():
         if numcol in df.columns:
             df[numcol] = pd.to_numeric(df[numcol], errors="coerce")
 
@@ -120,7 +135,7 @@ def reload_df() -> None:
 def build_unique_values(df: pd.DataFrame, max_uniques: int = 200) -> Dict[str, List[str]]:
     unique: Dict[str, List[str]] = {}
     for c in df.columns:
-        if c in EXCLUDE_COLS:
+        if c in app.config["EXCLUDE_COLS"]:
             continue
         vals = pd.Series(df[c].dropna().unique()).astype(str).tolist()
         vals = sorted(set(vals))[:max_uniques]
@@ -128,16 +143,17 @@ def build_unique_values(df: pd.DataFrame, max_uniques: int = 200) -> Dict[str, L
     return unique
 
 def get_base_date_bounds(df: pd.DataFrame) -> Tuple[str, str]:
-    if DATE_COL not in df.columns or len(df) == 0:
+    date_col = app.config["DATE_COL"]
+    if date_col not in df.columns or len(df) == 0:
         return "", ""
-    dmin = pd.to_datetime(df[DATE_COL], errors="coerce").min()
-    dmax = pd.to_datetime(df[DATE_COL], errors="coerce").max()
+    dmin = pd.to_datetime(df[date_col], errors="coerce").min()
+    dmax = pd.to_datetime(df[date_col], errors="coerce").max()
     s = dmin.date().isoformat() if pd.notna(dmin) else ""
     e = dmax.date().isoformat() if pd.notna(dmax) else ""
     return s, e
 
 def no_filters_selected(args, base_df: pd.DataFrame) -> bool:
-    any_checkbox = any(args.getlist(c) for c in base_df.columns if c not in EXCLUDE_COLS)
+    any_checkbox = any(args.getlist(c) for c in base_df.columns if c not in app.config["EXCLUDE_COLS"])
     if any_checkbox:
         return False
     base_min, base_max = get_base_date_bounds(base_df)
@@ -151,7 +167,7 @@ def no_filters_selected(args, base_df: pd.DataFrame) -> bool:
 
 def compute_stats(df: pd.DataFrame) -> Dict[str, Dict[str, Union[float, str]]]:
     stats: Dict[str, Dict[str, Union[float, str]]] = {}
-    for key, label in METRICS.items():
+    for key, label in app.config["METRICS"].items():
         if key in df.columns:
             s = pd.to_numeric(df[key], errors="coerce").dropna()
             if len(s) > 0:
@@ -165,6 +181,7 @@ def compute_stats(df: pd.DataFrame) -> Dict[str, Dict[str, Union[float, str]]]:
     return stats
 
 def compute_summary(df: pd.DataFrame) -> Dict[str, Union[int, str, None]]:
+    date_col = app.config["DATE_COL"]
     out: Dict[str, Union[int, str, None]] = {
         "rows": len(df),
         "cols": len(df.columns),
@@ -173,17 +190,20 @@ def compute_summary(df: pd.DataFrame) -> Dict[str, Union[int, str, None]]:
         "date_min": "",
         "date_max": "",
     }
-    if DATE_COL in df.columns and len(df) > 0:
-        dmin = pd.to_datetime(df[DATE_COL], errors="coerce").min()
-        dmax = pd.to_datetime(df[DATE_COL], errors="coerce").max()
+    if date_col in df.columns and len(df) > 0:
+        dmin = pd.to_datetime(df[date_col], errors="coerce").min()
+        dmax = pd.to_datetime(df[date_col], errors="coerce").max()
         if pd.notna(dmin):
             out["date_min"] = dmin.date().isoformat()
         if pd.notna(dmax):
             out["date_max"] = dmax.date().isoformat()
     return out
 
+# --------------------------------- Routes ------------------------------------
+
 @app.route("/", methods=["GET"])
 def index():
+    date_col = app.config["DATE_COL"]
     base = load_df().copy()
 
     # keep your "reset" behavior
@@ -192,14 +212,14 @@ def index():
 
     # build once, filter once
     params = build_params(request.args, base)
-    after = params.apply(base, DATE_COL)
+    after = params.apply(base, date_col)
 
     unique_values = build_unique_values(after)
 
     start_value = end_value = ""
-    if DATE_COL in after.columns and len(after) > 0:
-        dmin = pd.to_datetime(after[DATE_COL], errors="coerce").min()
-        dmax = pd.to_datetime(after[DATE_COL], errors="coerce").max()
+    if date_col in after.columns and len(after) > 0:
+        dmin = pd.to_datetime(after[date_col], errors="coerce").min()
+        dmax = pd.to_datetime(after[date_col], errors="coerce").max()
         if pd.notna(dmin): start_value = dmin.date().isoformat()
         if pd.notna(dmax): end_value   = dmax.date().isoformat()
 
@@ -215,7 +235,7 @@ def index():
 
     return render_template(
         "index.html",
-        date_col=DATE_COL,
+        date_col=date_col,
         stats=stats,
         summary=summary,
         start_value=start_value,
@@ -231,23 +251,24 @@ def index():
 
 @app.route("/chart-data", methods=["GET"])
 def chart_data():
+    date_col = app.config["DATE_COL"]
     base = load_df().copy(deep=False)
     params = build_params(request.args, base)
-    filtered = params.apply(base, DATE_COL)
+    filtered = params.apply(base, date_col)
 
     metric = validate_metric(filtered, params.metric)
-    if not metric or DATE_COL not in filtered.columns or filtered.empty:
-        return jsonify({"labels": [], "values": [], "metric_label": params.metric or "", "date_col": DATE_COL})
+    if not metric or date_col not in filtered.columns or filtered.empty:
+        return jsonify({"labels": [], "values": [], "metric_label": params.metric or "", "date_col": date_col})
 
-    s = filtered.dropna(subset=[DATE_COL]).copy()
-    s[DATE_COL] = pd.to_datetime(s[DATE_COL], errors="coerce")
-    s = s.dropna(subset=[DATE_COL])
+    s = filtered.dropna(subset=[date_col]).copy()
+    s[date_col] = pd.to_datetime(s[date_col], errors="coerce")
+    s = s.dropna(subset=[date_col])
     if s.empty:
-        return jsonify({"labels": [], "values": [], "metric_label": get_metric_label(metric), "date_col": DATE_COL})
+        return jsonify({"labels": [], "values": [], "metric_label": get_metric_label(metric), "date_col": date_col})
 
-    rule = FREQ_RULE.get(params.freq, "D")
+    rule = app.config["FREQ_RULE"].get(params.freq, "D")
 
-    ts = s.set_index(s[DATE_COL])
+    ts = s.set_index(s[date_col])
     grp = (ts[metric]
            .resample(rule, label="left", closed="left")
            .mean()
@@ -255,17 +276,18 @@ def chart_data():
            .sort_index())
 
     if grp is None or len(grp) == 0:
-        return jsonify({"labels": [], "values": [], "metric_label": get_metric_label(metric), "date_col": DATE_COL})
+        return jsonify({"labels": [], "values": [], "metric_label": get_metric_label(metric), "date_col": date_col})
 
     labels = [idx.strftime("%Y-%m") if params.freq == "M" else idx.date().isoformat() for idx in grp.index]
     values = [float(v) for v in grp.values]
-    return jsonify({"labels": labels, "values": values, "metric_label": get_metric_label(metric), "date_col": DATE_COL})
+    return jsonify({"labels": labels, "values": values, "metric_label": get_metric_label(metric), "date_col": date_col})
 
 @app.route("/pie-data", methods=["GET"])
 def pie_data():
+    date_col = app.config["DATE_COL"]
     base = load_df().copy(deep=False)
     params = build_params(request.args, base)
-    filtered = params.apply(base, DATE_COL)
+    filtered = params.apply(base, date_col)
 
     metric = validate_metric(filtered, params.metric)
     segment_col = "res_mapped" if "res_mapped" in filtered.columns else ("loc" if "loc" in filtered.columns else None)
@@ -295,9 +317,10 @@ def pie_data():
 
 @app.route("/bar-data", methods=["GET"])
 def bar_data():
+    date_col = app.config["DATE_COL"]
     base = load_df().copy(deep=False)
     params = build_params(request.args, base)
-    filtered = params.apply(base, DATE_COL)
+    filtered = params.apply(base, date_col)
 
     metric = validate_metric(filtered, params.metric)
     city_col = "loc"
@@ -316,6 +339,8 @@ def bar_data():
     labels = grp.index.tolist()
     values = [float(v) for v in grp.values]
     return jsonify({"labels": labels, "values": values, "metric_label": get_metric_label(metric), "segment": city_col})
+
+# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=False)
