@@ -1,10 +1,18 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 import os
+import logging
 import pandas as pd
-from functools import lru_cache
 from typing import Dict, List, Tuple, Union, Optional
 from datetime import datetime, date
 from filter_params import FilterParams
+
+# ------------------------------ Logging --------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("volta")
+# -----------------------------------------------------------------------------
 
 app = Flask(__name__)
 
@@ -38,17 +46,27 @@ class Config:
 app.config.from_object(Config)
 # -----------------------------------------------------------------------------
 
+# ------------------------------ OOP: Metrics ---------------------------------
+class Metrics:
+    """Encapsulate metric mapping + helpers."""
+    def __init__(self, mapping: Dict[str, str]):
+        self.mapping = dict(mapping)
 
-def get_metric_label(key: str) -> str:
-    """UI label for a metric key; falls back to the key if unknown."""
-    return app.config["METRICS"].get(key, key)
+    def label(self, key: Optional[str]) -> str:
+        if not key:
+            return ""
+        return self.mapping.get(key, key)
 
-def validate_metric(df: pd.DataFrame, metric: Optional[str]) -> Optional[str]:
-    """Return metric if present in df and known, else None."""
-    if not metric:
-        return None
-    return metric if (metric in df.columns and metric in app.config["METRICS"]) else None
+    def validate(self, df: pd.DataFrame, metric: Optional[str]) -> Optional[str]:
+        if not metric:
+            return None
+        return metric if (metric in df.columns and metric in self.mapping) else None
 
+    def available(self, df: pd.DataFrame) -> List[Tuple[str, str]]:
+        return [(k, v) for k, v in self.mapping.items() if k in df.columns]
+
+metrics = Metrics(app.config["METRICS"])
+# -----------------------------------------------------------------------------
 
 def _parse_date(s: str) -> Optional[date]:
     if not s:
@@ -84,9 +102,6 @@ def build_params(args, base_df: pd.DataFrame) -> FilterParams:
         metric=metric,
     )
 
-def available_chart_metrics(df: pd.DataFrame) -> List[Tuple[str, str]]:
-    return [(k, v) for k, v in app.config["METRICS"].items() if k in df.columns]
-
 def clean_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
     """
     Remove all rows that contain any NaN values.
@@ -94,43 +109,78 @@ def clean_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
     """
     return df.dropna(how="any").reset_index(drop=True)
 
-@lru_cache(maxsize=1)
+# ------------------------------ OOP: DataStore -------------------------------
+class DataStore:
+    """Own data loading, preprocessing, and in-memory caching."""
+    def __init__(self, app: Flask):
+        self.app = app
+        self._df: Optional[pd.DataFrame] = None
+
+    def _preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
+        # Drop duplicate rows (keep first occurrence)
+        df = df.drop_duplicates().reset_index(drop=True)
+        # Remove NaN rows
+        df = clean_nan_rows(df)
+
+        # One-time mapping
+        if "res" in df.columns:
+            df["res_mapped"] = df["res"].astype(str).map(self.app.config["RES_MAP"]).fillna("Unknown")
+
+        # One-time date parsing
+        date_col = self.app.config["DATE_COL"]
+        if date_col in df.columns and not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+            df[date_col] = pd.to_datetime(df[date_col], errors="coerce", format="%d-%b-%y")
+
+        # One-time numeric coercion so stats/charts work
+        for numcol in metrics.mapping.keys():
+            if numcol in df.columns:
+                df[numcol] = pd.to_numeric(df[numcol], errors="coerce")
+
+        return df
+
+    def load(self) -> pd.DataFrame:
+        """Load parquet once and cache it."""
+        if self._df is not None:
+            return self._df
+
+        path = self.app.config["DATA_PATH"]
+        if not os.path.exists(path):
+            logger.error("DATA_PATH not found: %s", path)
+            raise FileNotFoundError(
+                f"DATA_PATH not found: {path}. Set VOLTA_DATA_PATH to override."
+            )
+
+        try:
+            raw = pd.read_parquet(path)
+        except Exception:
+            logger.exception("Failed to read parquet at %s", path)
+            raise
+
+        logger.info("Loaded raw DataFrame: %s rows, %s cols", len(raw), len(raw.columns))
+        self._df = self._preprocess(raw)
+        logger.info("Processed DataFrame: %s rows, %s cols", len(self._df), len(self._df.columns))
+        return self._df
+
+    def get(self, copy: bool = True) -> pd.DataFrame:
+        """Return cached df (optionally a shallow copy for safety)."""
+        df = self.load()
+        return df.copy(deep=False) if copy else df
+
+    def reload(self) -> None:
+        """Drop cache; next call to load/get will re-read from disk."""
+        self._df = None
+        logger.info("DataStore cache cleared")
+
+# Singleton datastore
+datastore = DataStore(app)
+# -----------------------------------------------------------------------------
+
+# Back-compat thin wrappers so the rest of your code doesn't change:
 def load_df() -> pd.DataFrame:
-    """Load parquet once, do one-time preprocessing, cache result in-memory."""
-    path = app.config["DATA_PATH"]
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"DATA_PATH not found: {path}. Set VOLTA_DATA_PATH to override."
-        )
-
-    df = pd.read_parquet(path)
-
-    # Drop duplicate rows (keep first occurrence)
-    df = df.drop_duplicates().reset_index(drop=True)
-
-    # Remove NaN rows
-    df = clean_nan_rows(df)
-
-    # One-time mapping
-    if "res" in df.columns:
-        df["res_mapped"] = df["res"].astype(str).map(app.config["RES_MAP"]).fillna("Unknown")
-
-    # One-time date parsing
-    date_col = app.config["DATE_COL"]
-    if date_col in df.columns and not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-        # adjust format if needed
-        df[date_col] = pd.to_datetime(df[date_col], errors="coerce", format="%d-%b-%y")
-
-    # One-time numeric coercion so stats/charts work
-    for numcol in app.config["METRICS"].keys():
-        if numcol in df.columns:
-            df[numcol] = pd.to_numeric(df[numcol], errors="coerce")
-
-    return df
+    return datastore.load()
 
 def reload_df() -> None:
-    """Clear the cached DataFrame (use if file changes)."""
-    load_df.cache_clear()
+    datastore.reload()
 
 def build_unique_values(df: pd.DataFrame, max_uniques: int = 200) -> Dict[str, List[str]]:
     unique: Dict[str, List[str]] = {}
@@ -167,7 +217,7 @@ def no_filters_selected(args, base_df: pd.DataFrame) -> bool:
 
 def compute_stats(df: pd.DataFrame) -> Dict[str, Dict[str, Union[float, str]]]:
     stats: Dict[str, Dict[str, Union[float, str]]] = {}
-    for key, label in app.config["METRICS"].items():
+    for key, label in metrics.mapping.items():
         if key in df.columns:
             s = pd.to_numeric(df[key], errors="coerce").dropna()
             if len(s) > 0:
@@ -226,7 +276,7 @@ def index():
     stats = compute_stats(after)
     summary = compute_summary(after)
 
-    chart_metrics = available_chart_metrics(after)
+    chart_metrics = metrics.available(after)
     default_metric = chart_metrics[0][0] if chart_metrics else ""
 
     preview_html = after.head(10).to_html(
@@ -252,11 +302,11 @@ def index():
 @app.route("/chart-data", methods=["GET"])
 def chart_data():
     date_col = app.config["DATE_COL"]
-    base = load_df().copy(deep=False)
+    base = datastore.get(copy=False)  # same as load_df().copy(deep=False)
     params = build_params(request.args, base)
     filtered = params.apply(base, date_col)
 
-    metric = validate_metric(filtered, params.metric)
+    metric = metrics.validate(filtered, params.metric)
     if not metric or date_col not in filtered.columns or filtered.empty:
         return jsonify({"labels": [], "values": [], "metric_label": params.metric or "", "date_col": date_col})
 
@@ -264,7 +314,7 @@ def chart_data():
     s[date_col] = pd.to_datetime(s[date_col], errors="coerce")
     s = s.dropna(subset=[date_col])
     if s.empty:
-        return jsonify({"labels": [], "values": [], "metric_label": get_metric_label(metric), "date_col": date_col})
+        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "date_col": date_col})
 
     rule = app.config["FREQ_RULE"].get(params.freq, "D")
 
@@ -276,20 +326,20 @@ def chart_data():
            .sort_index())
 
     if grp is None or len(grp) == 0:
-        return jsonify({"labels": [], "values": [], "metric_label": get_metric_label(metric), "date_col": date_col})
+        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "date_col": date_col})
 
     labels = [idx.strftime("%Y-%m") if params.freq == "M" else idx.date().isoformat() for idx in grp.index]
     values = [float(v) for v in grp.values]
-    return jsonify({"labels": labels, "values": values, "metric_label": get_metric_label(metric), "date_col": date_col})
+    return jsonify({"labels": labels, "values": values, "metric_label": metrics.label(metric), "date_col": date_col})
 
 @app.route("/pie-data", methods=["GET"])
 def pie_data():
     date_col = app.config["DATE_COL"]
-    base = load_df().copy(deep=False)
+    base = datastore.get(copy=False)
     params = build_params(request.args, base)
     filtered = params.apply(base, date_col)
 
-    metric = validate_metric(filtered, params.metric)
+    metric = metrics.validate(filtered, params.metric)
     segment_col = "res_mapped" if "res_mapped" in filtered.columns else ("loc" if "loc" in filtered.columns else None)
 
     if not metric or segment_col is None or filtered.empty:
@@ -299,7 +349,7 @@ def pie_data():
     s[metric] = pd.to_numeric(s[metric], errors="coerce")
     s = s.dropna(subset=[metric])
     if s.empty:
-        return jsonify({"labels": [], "values": [], "metric_label": get_metric_label(metric), "segment": segment_col})
+        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": segment_col})
 
     grp = s.groupby(s[segment_col].astype(str))[metric].sum().sort_values(ascending=False)
 
@@ -313,16 +363,16 @@ def pie_data():
         labels = grp.index.tolist()
         values = [float(v) for v in grp.values]
 
-    return jsonify({"labels": labels, "values": values, "metric_label": get_metric_label(metric), "segment": segment_col})
+    return jsonify({"labels": labels, "values": values, "metric_label": metrics.label(metric), "segment": segment_col})
 
 @app.route("/bar-data", methods=["GET"])
 def bar_data():
     date_col = app.config["DATE_COL"]
-    base = load_df().copy(deep=False)
+    base = datastore.get(copy=False)
     params = build_params(request.args, base)
     filtered = params.apply(base, date_col)
 
-    metric = validate_metric(filtered, params.metric)
+    metric = metrics.validate(filtered, params.metric)
     city_col = "loc"
 
     if not metric or city_col not in filtered.columns or filtered.empty:
@@ -332,13 +382,26 @@ def bar_data():
     s[metric] = pd.to_numeric(s[metric], errors="coerce")
     s = s.dropna(subset=[metric])
     if s.empty:
-        return jsonify({"labels": [], "values": [], "metric_label": get_metric_label(metric), "segment": city_col})
+        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": city_col})
 
     grp = s.groupby(s[city_col].astype(str))[metric].sum().sort_values(ascending=False)
 
     labels = grp.index.tolist()
     values = [float(v) for v in grp.values]
-    return jsonify({"labels": labels, "values": values, "metric_label": get_metric_label(metric), "segment": city_col})
+    return jsonify({"labels": labels, "values": values, "metric_label": metrics.label(metric), "segment": city_col})
+
+@app.route("/health", methods=["GET"])
+def health():
+    try:
+        df = datastore.get(copy=False)
+        return jsonify({
+            "ok": True,
+            "rows": int(len(df)),
+            "cols": int(len(df.columns))
+        }), 200
+    except Exception as e:
+        logger.exception("Healthcheck failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # -----------------------------------------------------------------------------
 
