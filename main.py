@@ -2,6 +2,10 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify
 import pandas as pd
 from functools import lru_cache
 from typing import Dict, List, Tuple, Union
+from datetime import datetime, date
+from typing import Optional
+from filter_params import FilterParams
+
 
 app = Flask(__name__)
 
@@ -18,6 +22,56 @@ RES_MAP = {"N-Resid [0]": "Commercial", "Resid [1]": "Residential"}
 
 # chartable numeric metrics (label for UI)
 CHART_METRICS: List[Tuple[str, str]] = [("kwh", "kWh"), ("paymoney", "Pay"), ("ghc", "GHC")]
+
+
+def _parse_date(s: str) -> Optional[date]:
+    if not s:
+        return None
+    # Prefer strict YYYY-MM-DD, fall back to pandas parsing
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        d = pd.to_datetime(s, errors="coerce")
+        return d.date() if pd.notna(d) else None
+
+def build_params(args, base_df: pd.DataFrame) -> FilterParams:
+    # collect categorical selections for every non-excluded column
+    selections: Dict[str, List[str]] = {}
+    for c in base_df.columns:
+        if c in EXCLUDE_COLS:
+            continue
+        vals = args.getlist(c)
+        if vals:
+            selections[c] = [str(v) for v in vals]
+
+    freq = (args.get("freq") or "D").upper()
+    if freq not in ("D", "W", "M"):
+        freq = "D"
+
+    metric = args.get("metric") or None
+
+    return FilterParams(
+        start=_parse_date(args.get("start_date", "")),
+        end=_parse_date(args.get("end_date", "")),
+        selections=selections,
+        freq=freq,
+        metric=metric,
+    )
+
+def apply_filters(df: pd.DataFrame, p: FilterParams) -> pd.DataFrame:
+    out = df
+    # categorical filters
+    for col, vals in p.selections.items():
+        if col in out.columns and vals:
+            out = out[out[col].astype(str).isin(vals)]
+    # date range
+    if DATE_COL in out.columns:
+        if p.start is not None:
+            out = out[out[DATE_COL] >= pd.Timestamp(p.start)]
+        if p.end is not None:
+            out = out[out[DATE_COL] <= pd.Timestamp(p.end)]
+    return out
+
 
 
 def available_chart_metrics(df: pd.DataFrame) -> List[Tuple[str, str]]:
@@ -64,31 +118,6 @@ def load_df() -> pd.DataFrame:
 def reload_df() -> None:
     """Clear the cached DataFrame (use if file changes)."""
     load_df.cache_clear()
-
-
-def apply_checkbox_filters(df: pd.DataFrame, args) -> pd.DataFrame:
-    out = df
-    for c in out.columns:
-        if c in EXCLUDE_COLS:
-            continue
-        sel = args.getlist(c)
-        if sel:
-            out = out[out[c].astype(str).isin(sel)]
-    return out
-
-
-def apply_date_filter(df: pd.DataFrame, args) -> pd.DataFrame:
-    """Apply date filter if start/end provided."""
-    if DATE_COL not in df.columns:
-        return df
-    start_date = args.get("start_date", "")
-    end_date = args.get("end_date", "")
-    out = df
-    if start_date:
-        out = out[out[DATE_COL] >= pd.to_datetime(start_date)]
-    if end_date:
-        out = out[out[DATE_COL] <= pd.to_datetime(end_date)]
-    return out
 
 
 def build_unique_values(df: pd.DataFrame, max_uniques: int = 200) -> Dict[str, List[str]]:
@@ -169,37 +198,30 @@ def compute_summary(df: pd.DataFrame) -> Dict[str, Union[int, str, None]]:
 def index():
     base = load_df().copy()
 
-    # Reset behavior when nothing is actually selected
+    # keep your "reset" behavior
     if request.args and no_filters_selected(request.args, base):
         return redirect(url_for("index"))
 
-    # Filters
-    after_cat = apply_checkbox_filters(base, request.args)
-    after_date = apply_date_filter(after_cat, request.args)
+    # NEW: build once, filter once
+    params = build_params(request.args, base)
+    after = apply_filters(base, params)
 
-    # Unique options cascade with final dataset
-    unique_values = build_unique_values(after_date)
+    unique_values = build_unique_values(after)
 
-    # Date inputs show min/max of final dataset
     start_value = end_value = ""
-    if DATE_COL in after_date.columns and len(after_date) > 0:
-        dmin = pd.to_datetime(after_date[DATE_COL], errors="coerce").min()
-        dmax = pd.to_datetime(after_date[DATE_COL], errors="coerce").max()
-        if pd.notna(dmin):
-            start_value = dmin.date().isoformat()
-        if pd.notna(dmax):
-            end_value = dmax.date().isoformat()
+    if DATE_COL in after.columns and len(after) > 0:
+        dmin = pd.to_datetime(after[DATE_COL], errors="coerce").min()
+        dmax = pd.to_datetime(after[DATE_COL], errors="coerce").max()
+        if pd.notna(dmin): start_value = dmin.date().isoformat()
+        if pd.notna(dmax): end_value   = dmax.date().isoformat()
 
-    # Stats + summary
-    stats = compute_stats(after_date)
-    summary = compute_summary(after_date)
+    stats = compute_stats(after)
+    summary = compute_summary(after)
 
-    # Chart metric options (only those present)
-    chart_metrics = available_chart_metrics(after_date)
+    chart_metrics = available_chart_metrics(after)
     default_metric = chart_metrics[0][0] if chart_metrics else ""
 
-    # Preview: first 10 rows only
-    preview_html = after_date.head(10).to_html(
+    preview_html = after.head(10).to_html(
         classes="table table-sm table-striped table-hover", index=False
     )
 
@@ -212,102 +234,70 @@ def index():
         end_value=end_value,
         unique_values=unique_values,
         args=request.args,
-        total_rows=len(after_date),
-        total_cols=len(after_date.columns),
+        total_rows=len(after),
+        total_cols=len(after.columns),
         preview_html=preview_html,
         chart_metrics=chart_metrics,
         default_metric=default_metric,
     )
 
 
+
 @app.route("/chart-data", methods=["GET"])
 def chart_data():
-    """
-    Return JSON (date-bucket, mean(metric)) for current filters with chosen granularity.
-    Empty resample buckets are dropped to avoid NaN/None in the chart.
-    """
     base = load_df().copy(deep=False)
+    params = build_params(request.args, base)
+    filtered = apply_filters(base, params)
 
-    # Apply same filters as the table
-    after_cat = apply_checkbox_filters(base, request.args)
-    filtered = apply_date_filter(after_cat, request.args)
-
-    metric = request.args.get("metric", "")
+    metric = params.metric or ""
     if not metric or metric not in filtered.columns or DATE_COL not in filtered.columns or filtered.empty:
         return jsonify({"labels": [], "values": [], "metric_label": metric, "date_col": DATE_COL})
 
-    # Parse dates & keep valid rows
     s = filtered.dropna(subset=[DATE_COL]).copy()
     s[DATE_COL] = pd.to_datetime(s[DATE_COL], errors="coerce")
     s = s.dropna(subset=[DATE_COL])
     if s.empty:
         return jsonify({"labels": [], "values": [], "metric_label": metric, "date_col": DATE_COL})
 
-    # Frequency handling
-    freq = (request.args.get("freq", "D") or "D").upper()
-    if freq not in ("D", "W", "M"):
-        freq = "D"
-    freq_map = {"D": "D", "W": "W-MON", "M": "M"}  # weekly anchored to Monday
+    rule = {"D": "D", "W": "W-MON", "M": "M"}[params.freq]
 
-    # Resample to mean and DROP empty buckets (no NaNs left)
     ts = s.set_index(s[DATE_COL])
-    grp = (
-        ts[metric]
-        .resample(freq_map[freq], label="left", closed="left")
-        .mean()
-        .dropna()
-        .sort_index()
-    )
+    grp = (ts[metric]
+           .resample(rule, label="left", closed="left")
+           .mean()
+           .dropna()
+           .sort_index())
 
-    # If no buckets after dropping NaNs, return empty arrays
     if grp is None or len(grp) == 0:
-        return jsonify(
-            {
-                "labels": [],
-                "values": [],
-                "metric_label": dict(CHART_METRICS).get(metric, metric),
-                "date_col": DATE_COL,
-            }
-        )
+        return jsonify({"labels": [], "values": [], "metric_label": dict(CHART_METRICS).get(metric, metric), "date_col": DATE_COL})
 
-    # Labels
-    labels = [idx.strftime("%Y-%m") if freq == "M" else idx.date().isoformat() for idx in grp.index]
-
-    # Values: all finite now; just cast to float
+    labels = [idx.strftime("%Y-%m") if params.freq == "M" else idx.date().isoformat() for idx in grp.index]
     values = [float(v) for v in grp.values]
-
     metric_label = dict(CHART_METRICS).get(metric, metric)
     return jsonify({"labels": labels, "values": values, "metric_label": metric_label, "date_col": DATE_COL})
 
 
+
 @app.route("/pie-data", methods=["GET"])
 def pie_data():
-    """
-    Return JSON for a composition donut: sum(metric) by segment.
-    Default segment is 'res_mapped' (Commercial/Residential). Falls back to 'loc' if needed.
-    """
     base = load_df().copy(deep=False)
+    params = build_params(request.args, base)
+    filtered = apply_filters(base, params)
 
-    after_cat = apply_checkbox_filters(base, request.args)
-    filtered = apply_date_filter(after_cat, request.args)
-
-    metric = request.args.get("metric", "")
+    metric = params.metric or ""
     segment_col = "res_mapped" if "res_mapped" in filtered.columns else ("loc" if "loc" in filtered.columns else None)
 
     if not metric or metric not in filtered.columns or segment_col is None or filtered.empty:
         return jsonify({"labels": [], "values": [], "metric_label": metric, "segment": segment_col or ""})
 
-    # keep valid metric rows
     s = filtered.dropna(subset=[segment_col]).copy()
     s[metric] = pd.to_numeric(s[metric], errors="coerce")
     s = s.dropna(subset=[metric])
     if s.empty:
         return jsonify({"labels": [], "values": [], "metric_label": metric, "segment": segment_col})
 
-    # Sum by segment
     grp = s.groupby(s[segment_col].astype(str))[metric].sum().sort_values(ascending=False)
 
-    # Optional: top-N + "Other"
     TOP_N = 8
     if len(grp) > TOP_N:
         top = grp.iloc[:TOP_N]
@@ -322,18 +312,15 @@ def pie_data():
     return jsonify({"labels": labels, "values": values, "metric_label": metric_label, "segment": segment_col})
 
 
+
 @app.route("/bar-data", methods=["GET"])
 def bar_data():
-    """
-    Return JSON for a bar chart: sum(metric) grouped by city (loc).
-    """
     base = load_df().copy(deep=False)
+    params = build_params(request.args, base)
+    filtered = apply_filters(base, params)
 
-    after_cat = apply_checkbox_filters(base, request.args)
-    filtered = apply_date_filter(after_cat, request.args)
-
-    metric = request.args.get("metric", "")
-    city_col = "loc"  # adjust if your city column has a different name
+    metric = params.metric or ""
+    city_col = "loc"
 
     if not metric or metric not in filtered.columns or city_col not in filtered.columns or filtered.empty:
         return jsonify({"labels": [], "values": [], "metric_label": metric, "segment": city_col or ""})
@@ -348,9 +335,9 @@ def bar_data():
 
     labels = grp.index.tolist()
     values = [float(v) for v in grp.values]
-
     metric_label = dict(CHART_METRICS).get(metric, metric)
     return jsonify({"labels": labels, "values": values, "metric_label": metric_label, "segment": city_col})
+
 
 
 if __name__ == "__main__":
