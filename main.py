@@ -204,7 +204,7 @@ def index():
 
     # NEW: build once, filter once
     params = build_params(request.args, base)
-    after = apply_filters(base, params)
+    after = params.apply(base, DATE_COL)
 
     unique_values = build_unique_values(after)
 
@@ -247,7 +247,7 @@ def index():
 def chart_data():
     base = load_df().copy(deep=False)
     params = build_params(request.args, base)
-    filtered = apply_filters(base, params)
+    filtered = params.apply(base, DATE_COL)
 
     metric = params.metric or ""
     if not metric or metric not in filtered.columns or DATE_COL not in filtered.columns or filtered.empty:
@@ -282,7 +282,7 @@ def chart_data():
 def pie_data():
     base = load_df().copy(deep=False)
     params = build_params(request.args, base)
-    filtered = apply_filters(base, params)
+    filtered = params.apply(base, DATE_COL)
 
     metric = params.metric or ""
     segment_col = "res_mapped" if "res_mapped" in filtered.columns else ("loc" if "loc" in filtered.columns else None)
@@ -317,7 +317,7 @@ def pie_data():
 def bar_data():
     base = load_df().copy(deep=False)
     params = build_params(request.args, base)
-    filtered = apply_filters(base, params)
+    filtered = params.apply(base, DATE_COL)
 
     metric = params.metric or ""
     city_col = "loc"
