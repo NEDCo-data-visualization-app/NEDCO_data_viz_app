@@ -42,7 +42,7 @@ def load_df():
 
         # One-time date parsing
         if DATE_COL in df.columns and not pd.api.types.is_datetime64_any_dtype(df[DATE_COL]):
-            df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors="coerce")
+            df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors="coerce", format="%d-%b-%y")
 
         # One-time numeric coercion so stats/charts work
         for numcol in ("kwh", "paymoney", "ghc"):
