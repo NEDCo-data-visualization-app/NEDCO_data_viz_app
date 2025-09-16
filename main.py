@@ -18,11 +18,9 @@ app = Flask(__name__)
 
 # ------------------------------ Config ---------------------------------------
 class Config:
-    # You can override these with environment variables
     DATA_PATH = os.getenv("VOLTA_DATA_PATH", "data/wkfile_shiny.parquet")
     DATE_COL = os.getenv("VOLTA_DATE_COL", "chargedate")
 
-    # Hide these from the checkbox UI
     EXCLUDE_COLS = {
         "chargedate", "chargedate_str", "month", "month_str", "year",
         "kwh", "ghc", "paymoney", "res"
@@ -30,7 +28,6 @@ class Config:
 
     RES_MAP = {"N-Resid [0]": "Commercial", "Resid [1]": "Residential"}
 
-    # Centralized metrics & frequency config
     METRICS: Dict[str, str] = {
         "kwh": "kWh",
         "paymoney": "Pay",
@@ -39,7 +36,7 @@ class Config:
 
     FREQ_RULE: Dict[str, str] = {
         "D": "D",
-        "W": "W-MON",  # weekly anchored to Monday
+        "W": "W-MON",
         "M": "M",
     }
 
@@ -71,7 +68,6 @@ metrics = Metrics(app.config["METRICS"])
 def _parse_date(s: str) -> Optional[date]:
     if not s:
         return None
-    # Prefer strict YYYY-MM-DD, fall back to pandas parsing
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except ValueError:
@@ -79,7 +75,6 @@ def _parse_date(s: str) -> Optional[date]:
         return d.date() if pd.notna(d) else None
 
 def build_params(args, base_df: pd.DataFrame) -> FilterParams:
-    # collect categorical selections for every non-excluded column
     selections: Dict[str, List[str]] = {}
     for c in base_df.columns:
         if c in app.config["EXCLUDE_COLS"]:
@@ -103,35 +98,26 @@ def build_params(args, base_df: pd.DataFrame) -> FilterParams:
     )
 
 def clean_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Remove all rows that contain any NaN values.
-    Returns a new DataFrame without modifying the original.
-    """
     return df.dropna(how="any").reset_index(drop=True)
 
 # ------------------------------ OOP: DataStore -------------------------------
 class DataStore:
-    """Own data loading, preprocessing, and in-memory caching."""
+    """Own data loading, preprocessing, derived stats, and in-memory caching."""
     def __init__(self, app: Flask):
         self.app = app
         self._df: Optional[pd.DataFrame] = None
 
     def _preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        # Drop duplicate rows (keep first occurrence)
         df = df.drop_duplicates().reset_index(drop=True)
-        # Remove NaN rows
         df = clean_nan_rows(df)
 
-        # One-time mapping
         if "res" in df.columns:
             df["res_mapped"] = df["res"].astype(str).map(self.app.config["RES_MAP"]).fillna("Unknown")
 
-        # One-time date parsing
         date_col = self.app.config["DATE_COL"]
         if date_col in df.columns and not pd.api.types.is_datetime64_any_dtype(df[date_col]):
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce", format="%d-%b-%y")
 
-        # One-time numeric coercion so stats/charts work
         for numcol in metrics.mapping.keys():
             if numcol in df.columns:
                 df[numcol] = pd.to_numeric(df[numcol], errors="coerce")
@@ -139,7 +125,6 @@ class DataStore:
         return df
 
     def load(self) -> pd.DataFrame:
-        """Load parquet once and cache it."""
         if self._df is not None:
             return self._df
 
@@ -162,20 +147,53 @@ class DataStore:
         return self._df
 
     def get(self, copy: bool = True) -> pd.DataFrame:
-        """Return cached df (optionally a shallow copy for safety)."""
         df = self.load()
         return df.copy(deep=False) if copy else df
 
     def reload(self) -> None:
-        """Drop cache; next call to load/get will re-read from disk."""
         self._df = None
         logger.info("DataStore cache cleared")
 
-# Singleton datastore
+    # ---- NEW: derived data lives with the data store ------------------------
+    def compute_stats(self, df: pd.DataFrame) -> Dict[str, Dict[str, Union[float, str]]]:
+        stats: Dict[str, Dict[str, Union[float, str]]] = {}
+        for key, label in metrics.mapping.items():
+            if key in df.columns:
+                s = pd.to_numeric(df[key], errors="coerce").dropna()
+                if len(s) > 0:
+                    stats[key] = {
+                        "label": label,
+                        "mean": float(s.mean()),
+                        "median": float(s.median()),
+                        "min": float(s.min()),
+                        "max": float(s.max()),
+                    }
+        return stats
+
+    def compute_summary(self, df: pd.DataFrame) -> Dict[str, Union[int, str, None]]:
+        date_col = self.app.config["DATE_COL"]
+        out: Dict[str, Union[int, str, None]] = {
+            "rows": len(df),
+            "cols": len(df.columns),
+            "meters": (df["meterid"].nunique() if "meterid" in df.columns else None),
+            "locations": (df["loc"].nunique() if "loc" in df.columns else None),
+            "date_min": "",
+            "date_max": "",
+        }
+        if date_col in df.columns and len(df) > 0:
+            dmin = pd.to_datetime(df[date_col], errors="coerce").min()
+            dmax = pd.to_datetime(df[date_col], errors="coerce").max()
+            if pd.notna(dmin):
+                out["date_min"] = dmin.date().isoformat()
+            if pd.notna(dmax):
+                out["date_max"] = dmax.date().isoformat()
+        return out
+    # ------------------------------------------------------------------------
+
 datastore = DataStore(app)
 # -----------------------------------------------------------------------------
 
-# Back-compat thin wrappers so the rest of your code doesn't change:
+# Thin wrappers so the rest of your code can keep same calls if you prefer
 def load_df() -> pd.DataFrame:
     return datastore.load()
 
@@ -215,40 +233,6 @@ def no_filters_selected(args, base_df: pd.DataFrame) -> bool:
         return True
     return False
 
-def compute_stats(df: pd.DataFrame) -> Dict[str, Dict[str, Union[float, str]]]:
-    stats: Dict[str, Dict[str, Union[float, str]]] = {}
-    for key, label in metrics.mapping.items():
-        if key in df.columns:
-            s = pd.to_numeric(df[key], errors="coerce").dropna()
-            if len(s) > 0:
-                stats[key] = {
-                    "label": label,
-                    "mean": float(s.mean()),
-                    "median": float(s.median()),
-                    "min": float(s.min()),
-                    "max": float(s.max()),
-                }
-    return stats
-
-def compute_summary(df: pd.DataFrame) -> Dict[str, Union[int, str, None]]:
-    date_col = app.config["DATE_COL"]
-    out: Dict[str, Union[int, str, None]] = {
-        "rows": len(df),
-        "cols": len(df.columns),
-        "meters": (df["meterid"].nunique() if "meterid" in df.columns else None),
-        "locations": (df["loc"].nunique() if "loc" in df.columns else None),
-        "date_min": "",
-        "date_max": "",
-    }
-    if date_col in df.columns and len(df) > 0:
-        dmin = pd.to_datetime(df[date_col], errors="coerce").min()
-        dmax = pd.to_datetime(df[date_col], errors="coerce").max()
-        if pd.notna(dmin):
-            out["date_min"] = dmin.date().isoformat()
-        if pd.notna(dmax):
-            out["date_max"] = dmax.date().isoformat()
-    return out
-
 # --------------------------------- Routes ------------------------------------
 
 @app.route("/", methods=["GET"])
@@ -256,11 +240,9 @@ def index():
     date_col = app.config["DATE_COL"]
     base = load_df().copy()
 
-    # keep your "reset" behavior
     if request.args and no_filters_selected(request.args, base):
         return redirect(url_for("index"))
 
-    # build once, filter once
     params = build_params(request.args, base)
     after = params.apply(base, date_col)
 
@@ -273,8 +255,9 @@ def index():
         if pd.notna(dmin): start_value = dmin.date().isoformat()
         if pd.notna(dmax): end_value   = dmax.date().isoformat()
 
-    stats = compute_stats(after)
-    summary = compute_summary(after)
+    # moved to datastore
+    stats = datastore.compute_stats(after)
+    summary = datastore.compute_summary(after)
 
     chart_metrics = metrics.available(after)
     default_metric = chart_metrics[0][0] if chart_metrics else ""
@@ -302,7 +285,7 @@ def index():
 @app.route("/chart-data", methods=["GET"])
 def chart_data():
     date_col = app.config["DATE_COL"]
-    base = datastore.get(copy=False)  # same as load_df().copy(deep=False)
+    base = datastore.get(copy=False)
     params = build_params(request.args, base)
     filtered = params.apply(base, date_col)
 
