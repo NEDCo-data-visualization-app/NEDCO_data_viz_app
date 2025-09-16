@@ -169,14 +169,14 @@
     refresh();
   }
 
-  // ---- NEW: meterid live search / reorder ----------------------------------
+  // ---- NEW: meterid live search / reorder with "pin selected" --------------
   function initMeteridSearch() {
     const input = document.getElementById('meteridSearch');
     const list  = document.getElementById('meteridList');
     if (!input || !list) return;
 
     function scoreItem(text, q) {
-      if (!q) return 2;               // neutral if empty
+      if (!q) return 2;                 // neutral if empty
       if (text.startsWith(q)) return 0; // best: starts with
       if (text.includes(q))  return 1;  // then: contains
       return 2;                         // otherwise: last
@@ -185,7 +185,18 @@
     const reorder = () => {
       const q = input.value.trim().toLowerCase();
       const items = Array.from(list.querySelectorAll('.meterid-item'));
-      items.sort((a, b) => {
+
+      // Split into selected vs unselected
+      const selected = [];
+      const unselected = [];
+      for (const el of items) {
+        const cb = el.querySelector('input[type="checkbox"]');
+        if (cb && cb.checked) selected.push(el);
+        else unselected.push(el);
+      }
+
+      // Sort unselected by search score, then alphabetically
+      unselected.sort((a, b) => {
         const ta = a.querySelector('.label-text').textContent.toLowerCase();
         const tb = b.querySelector('.label-text').textContent.toLowerCase();
         const sa = scoreItem(ta, q);
@@ -193,10 +204,19 @@
         if (sa !== sb) return sa - sb;
         return ta.localeCompare(tb);
       });
-      items.forEach(el => list.appendChild(el));
+
+      // Append selected first (pinned), then the sorted unselected
+      for (const el of [...selected, ...unselected]) {
+        list.appendChild(el);
+      }
     };
 
     input.addEventListener('input', reorder);
+    // re-run when checkboxes change, so newly selected items get pinned
+    list.addEventListener('change', reorder);
+
+    // Initial order on page load
+    reorder();
   }
   // --------------------------------------------------------------------------
 
