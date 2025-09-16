@@ -88,7 +88,7 @@
     });
   }
 
-  // NEW: bar chart (sum by city)
+  // Bar chart (sum by city)
   function drawBar(series, canvasEl) {
     if (!window.Chart || !canvasEl) return;
     const labels = Array.isArray(series?.labels) ? series.labels : [];
@@ -131,7 +131,7 @@
     const freqSelect   = document.getElementById('freqSelect');
     const lineEl       = document.getElementById('lineChart');
     const pieEl        = document.getElementById('pieChart');
-    const barEl        = document.getElementById('barChart'); // NEW
+    const barEl        = document.getElementById('barChart');
 
     if (!metricSelect || !freqSelect || !lineEl) return;
 
@@ -145,14 +145,14 @@
       const ts    = await fetchJson(tsUrl);
       if (ts) drawLine(ts, lineEl);
 
-      // Composition donut (sum by res_mapped)
+      // Composition donut
       if (pieEl) {
         const pieUrl = urlWithFilters('/pie-data', { metric });
         const pie    = await fetchJson(pieUrl);
         if (pie) drawPie(pie, pieEl);
       }
 
-      // Bar chart (sum by city)
+      // Bar chart
       if (barEl) {
         const barUrl = urlWithFilters('/bar-data', { metric });
         const bar    = await fetchJson(barUrl);
@@ -169,5 +169,39 @@
     refresh();
   }
 
-  document.addEventListener('DOMContentLoaded', initCharts);
+  // ---- NEW: meterid live search / reorder ----------------------------------
+  function initMeteridSearch() {
+    const input = document.getElementById('meteridSearch');
+    const list  = document.getElementById('meteridList');
+    if (!input || !list) return;
+
+    function scoreItem(text, q) {
+      if (!q) return 2;               // neutral if empty
+      if (text.startsWith(q)) return 0; // best: starts with
+      if (text.includes(q))  return 1;  // then: contains
+      return 2;                         // otherwise: last
+    }
+
+    const reorder = () => {
+      const q = input.value.trim().toLowerCase();
+      const items = Array.from(list.querySelectorAll('.meterid-item'));
+      items.sort((a, b) => {
+        const ta = a.querySelector('.label-text').textContent.toLowerCase();
+        const tb = b.querySelector('.label-text').textContent.toLowerCase();
+        const sa = scoreItem(ta, q);
+        const sb = scoreItem(tb, q);
+        if (sa !== sb) return sa - sb;
+        return ta.localeCompare(tb);
+      });
+      items.forEach(el => list.appendChild(el));
+    };
+
+    input.addEventListener('input', reorder);
+  }
+  // --------------------------------------------------------------------------
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initCharts();
+    initMeteridSearch(); // NEW
+  });
 })();

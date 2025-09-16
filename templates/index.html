@@ -20,7 +20,7 @@
 
           <hr class="my-3"/>
 
-          <!-- Checkbox filters -->
+          <!-- Checkbox filters (meterid has special UI: search + multi-select) -->
           <div class="accordion" id="filtersAccordion">
             {% for col, vals in unique_values.items() %}
               <div class="accordion-item">
@@ -35,16 +35,38 @@
                      aria-labelledby="heading-{{ loop.index }}" data-bs-parent="#filtersAccordion">
                   <div class="accordion-body">
                     {% if vals and vals|length > 0 %}
-                      <div class="filter-wrap">
-                        {% set selected = args.getlist(col) %}
-                        {% for v in vals %}
-                          <label>
-                            <input type="checkbox" name="{{ col }}" value="{{ v }}"
-                                   {% if v in selected %}checked{% endif %}>
-                            {{ v }}
-                          </label>
-                        {% endfor %}
-                      </div>
+                      {% set selected = args.getlist(col) %}
+
+                      {% if col|lower == 'meterid' %}
+                        <!-- Meter ID search + multi-select -->
+                        <div class="mb-2">
+                          <input id="meteridSearch"
+                                 type="text"
+                                 class="form-control"
+                                 placeholder="Search meterid (live)…">
+                          <div class="form-text">Type meter ID</div>
+                        </div>
+                        <div id="meteridList" class="filter-wrap">
+                          {% for v in vals %}
+                            <label class="meterid-item">
+                              <input type="checkbox" name="{{ col }}" value="{{ v }}"
+                                     {% if v in selected %}checked{% endif %}>
+                              <span class="label-text">{{ v }}</span>
+                            </label>
+                          {% endfor %}
+                        </div>
+                      {% else %}
+                        <!-- Default checkbox list -->
+                        <div class="filter-wrap">
+                          {% for v in vals %}
+                            <label>
+                              <input type="checkbox" name="{{ col }}" value="{{ v }}"
+                                     {% if v in selected %}checked{% endif %}>
+                              {{ v }}
+                            </label>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
                     {% else %}
                       <div class="text-muted">No values available.</div>
                     {% endif %}
@@ -69,7 +91,6 @@
       <div class="card-body">
         <h5 class="card-title">Results</h5>
 
-        <!-- Metric selector + single line chart + granularity -->
         {% if chart_metrics and chart_metrics|length > 0 %}
           {% set current_metric = args.get('metric') or default_metric %}
           {% set current_freq = (args.get('freq') or 'D').upper() %}
@@ -115,7 +136,7 @@
             </div>
           </div>
 
-          <!-- NEW: Bar chart by city -->
+          <!-- Bar chart by city -->
           <div class="card border-0 shadow-sm mb-3">
             <div class="card-body">
               <h6 class="mb-1">Totals by City</h6>
@@ -129,7 +150,6 @@
           </div>
         {% endif %}
 
-        <!-- Summary -->
         {% if summary %}
           <div class="text-muted small mb-3">
             {% if summary.date_min and summary.date_max %}
@@ -145,7 +165,6 @@
           </div>
         {% endif %}
 
-        <!-- KPI cards -->
         {% if stats %}
           {% for key, s in stats.items() %}
             <div class="card border-0 shadow-sm mb-3">
@@ -184,7 +203,6 @@
           {% endfor %}
         {% endif %}
 
-        <!-- Table: first 10 rows only -->
         <div class="table-responsive">
           {{ preview_html|safe }}
         </div>

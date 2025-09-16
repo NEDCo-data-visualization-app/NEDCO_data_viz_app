@@ -18,9 +18,11 @@ app = Flask(__name__)
 
 # ------------------------------ Config ---------------------------------------
 class Config:
+    # You can override these with environment variables
     DATA_PATH = os.getenv("VOLTA_DATA_PATH", "data/wkfile_shiny.parquet")
     DATE_COL = os.getenv("VOLTA_DATE_COL", "chargedate")
 
+    # Hide these from the checkbox UI
     EXCLUDE_COLS = {
         "chargedate", "chargedate_str", "month", "month_str", "year",
         "kwh", "ghc", "paymoney", "res"
@@ -28,6 +30,7 @@ class Config:
 
     RES_MAP = {"N-Resid [0]": "Commercial", "Resid [1]": "Residential"}
 
+    # Centralized metrics & frequency config
     METRICS: Dict[str, str] = {
         "kwh": "kWh",
         "paymoney": "Pay",
@@ -36,7 +39,7 @@ class Config:
 
     FREQ_RULE: Dict[str, str] = {
         "D": "D",
-        "W": "W-MON",
+        "W": "W-MON",  # weekly anchored to Monday
         "M": "M",
     }
 
@@ -75,6 +78,7 @@ def _parse_date(s: str) -> Optional[date]:
         return d.date() if pd.notna(d) else None
 
 def build_params(args, base_df: pd.DataFrame) -> FilterParams:
+    # collect categorical selections for every non-excluded column (including meterid)
     selections: Dict[str, List[str]] = {}
     for c in base_df.columns:
         if c in app.config["EXCLUDE_COLS"]:
@@ -154,7 +158,6 @@ class DataStore:
         self._df = None
         logger.info("DataStore cache cleared")
 
-    # ---- NEW: derived data lives with the data store ------------------------
     def compute_stats(self, df: pd.DataFrame) -> Dict[str, Dict[str, Union[float, str]]]:
         stats: Dict[str, Dict[str, Union[float, str]]] = {}
         for key, label in metrics.mapping.items():
@@ -188,12 +191,10 @@ class DataStore:
             if pd.notna(dmax):
                 out["date_max"] = dmax.date().isoformat()
         return out
-    # ------------------------------------------------------------------------
 
 datastore = DataStore(app)
 # -----------------------------------------------------------------------------
 
-# Thin wrappers so the rest of your code can keep same calls if you prefer
 def load_df() -> pd.DataFrame:
     return datastore.load()
 
@@ -255,7 +256,6 @@ def index():
         if pd.notna(dmin): start_value = dmin.date().isoformat()
         if pd.notna(dmax): end_value   = dmax.date().isoformat()
 
-    # moved to datastore
     stats = datastore.compute_stats(after)
     summary = datastore.compute_summary(after)
 
