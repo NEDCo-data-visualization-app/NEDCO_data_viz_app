@@ -83,6 +83,7 @@ class DataStore:
                 if len(s) > 0:
                     stats[key] = {
                         "label": label,
+                        "sum": float(s.sum()),
                         "mean": float(s.mean()),
                         "median": float(s.median()),
                         "min": float(s.min()),

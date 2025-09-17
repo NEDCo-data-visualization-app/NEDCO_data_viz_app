@@ -172,28 +172,34 @@
                   <h6 class="mb-0">{{ s.label }}</h6>
                 </div>
                 <div class="row g-2">
-                  <div class="col-6 col-md-3">
+                  <div class="col-6 col-md-4 col-xl-2">
+                    <div class="p-2 bg-light rounded">
+                      <div class="text-muted small">Sum</div>
+                      <div class="fs-5 fw-semibold text-nowrap">{{ "{:,.2f}".format(s.sum) }}</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-4 col-xl-2">
                     <div class="p-2 bg-light rounded">
                       <div class="text-muted small">Mean</div>
-                      <div class="fs-5 fw-semibold">{{ "{:,.2f}".format(s.mean) }}</div>
+                      <div class="fs-5 fw-semibold text-nowrap">{{ "{:,.2f}".format(s.mean) }}</div>
                     </div>
                   </div>
-                  <div class="col-6 col-md-3">
+                 <div class="col-6 col-md-4 col-xl-2">
                     <div class="p-2 bg-light rounded">
                       <div class="text-muted small">Median</div>
-                      <div class="fs-5 fw-semibold">{{ "{:,.2f}".format(s.median) }}</div>
+                      <div class="fs-5 fw-semibold text-nowrap">{{ "{:,.2f}".format(s.median) }}</div>
                     </div>
                   </div>
-                  <div class="col-6 col-md-3">
+                  <div class="col-6 col-md-4 col-xl-2">
                     <div class="p-2 bg-light rounded">
                       <div class="text-muted small">Min</div>
-                      <div class="fs-5 fw-semibold">{{ "{:,.2f}".format(s.min) }}</div>
+                      <div class="fs-5 fw-semibold text-nowrap">{{ "{:,.2f}".format(s.min) }}</div>
                     </div>
                   </div>
-                  <div class="col-6 col-md-3">
+                  <div class="col-6 col-md-4 col-xl-2">
                     <div class="p-2 bg-light rounded">
                       <div class="text-muted small">Max</div>
-                      <div class="fs-5 fw-semibold">{{ "{:,.2f}".format(s.max) }}</div>
+                      <div class="fs-5 fw-semibold text-nowrap">{{ "{:,.2f}".format(s.max) }}</div>
                     </div>
                   </div>
                 </div>
