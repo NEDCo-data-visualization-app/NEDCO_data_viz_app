@@ -16,7 +16,7 @@ from flask import (
     url_for,
 )
 
-from filter_params import FilterParams
+from volta.utils.filter_params import FilterParams
 
 bp = Blueprint("dashboard", __name__)
 
