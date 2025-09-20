@@ -169,11 +169,10 @@
     refresh();
   }
 
-  // ---- NEW: meterid live search / reorder with "pin selected" --------------
-  function initMeteridSearch() {
-    const input = document.getElementById('meteridSearch');
-    const list  = document.getElementById('meteridList');
-    if (!input || !list) return;
+  // ---- NEW: generic live search / reorder with "pin selected" --------------
+  function initFilterSearch() {
+    const inputs = document.querySelectorAll('.filter-search-input[data-filter-target]');
+    if (!inputs.length) return;
 
     function scoreItem(text, q) {
       if (!q) return 2;                 // neutral if empty
@@ -182,11 +181,12 @@
       return 2;                         // otherwise: last
     }
 
-    const reorder = () => {
+    function reorder(input, list) {
+      if (!list) return;
       const q = input.value.trim().toLowerCase();
-      const items = Array.from(list.querySelectorAll('.meterid-item'));
+      const items = Array.from(list.querySelectorAll('.filter-item'));
+      if (!items.length) return;
 
-      // Split into selected vs unselected
       const selected = [];
       const unselected = [];
       for (const el of items) {
@@ -195,33 +195,41 @@
         else unselected.push(el);
       }
 
-      // Sort unselected by search score, then alphabetically
+      const textFor = (el) => {
+        const label = el.querySelector('.label-text');
+        return (label ? label.textContent : el.textContent || '').trim().toLowerCase();
+      };
+
       unselected.sort((a, b) => {
-        const ta = a.querySelector('.label-text').textContent.toLowerCase();
-        const tb = b.querySelector('.label-text').textContent.toLowerCase();
+        const ta = textFor(a);
+        const tb = textFor(b);
         const sa = scoreItem(ta, q);
         const sb = scoreItem(tb, q);
         if (sa !== sb) return sa - sb;
         return ta.localeCompare(tb);
       });
 
-      // Append selected first (pinned), then the sorted unselected
       for (const el of [...selected, ...unselected]) {
         list.appendChild(el);
       }
-    };
+    }
 
-    input.addEventListener('input', reorder);
-    // re-run when checkboxes change, so newly selected items get pinned
-    list.addEventListener('change', reorder);
+    inputs.forEach((input) => {
+      const selector = input.getAttribute('data-filter-target');
+      if (!selector) return;
+      const list = document.querySelector(selector);
+      if (!list) return;
 
-    // Initial order on page load
-    reorder();
+      const run = () => reorder(input, list);
+      input.addEventListener('input', run);
+      list.addEventListener('change', run);
+      run();
+    });
   }
   // --------------------------------------------------------------------------
 
   document.addEventListener('DOMContentLoaded', () => {
     initCharts();
-    initMeteridSearch(); // NEW
+    initFilterSearch(); // NEW
   });
 })();

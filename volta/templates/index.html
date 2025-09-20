@@ -42,12 +42,31 @@
                         <div class="mb-2">
                           <input id="meteridSearch"
                                  type="text"
-                                 class="form-control"
+                                 class="form-control filter-search-input"
+                                 data-filter-target="#meteridList"
                                  placeholder="Search meterid">
                         </div>
                         <div id="meteridList" class="filter-wrap">
                           {% for v in vals %}
-                            <label class="meterid-item">
+                            <label class="filter-item meterid-item">
+                              <input type="checkbox" name="{{ col }}" value="{{ v }}"
+                                     {% if v in selected %}checked{% endif %}>
+                              <span class="label-text">{{ v }}</span>
+                            </label>
+                          {% endfor %}
+                        </div>
+                      {% elif col|lower == 'loc' %}
+                        <!-- Location search + multi-select -->
+                        <div class="mb-2">
+                          <input id="locSearch"
+                                 type="text"
+                                 class="form-control filter-search-input"
+                                 data-filter-target="#locList"
+                                 placeholder="Search location">
+                        </div>
+                        <div id="locList" class="filter-wrap">
+                          {% for v in vals %}
+                            <label class="filter-item">
                               <input type="checkbox" name="{{ col }}" value="{{ v }}"
                                      {% if v in selected %}checked{% endif %}>
                               <span class="label-text">{{ v }}</span>
