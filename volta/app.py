@@ -18,13 +18,21 @@ from .config import Config
 from .routes.dashboard import bp as dashboard_bp
 from .services.datastore import DataStore
 from .services.metrics import Metrics
+import os
+import sys
 
 
 def create_app(
     config_object: Optional[Union[str, Mapping[str, Any], type]] = None,
 ) -> Flask:
     """Create and configure the Flask application."""
-    app = Flask(__name__)
+
+    if getattr(sys, "frozen", False):
+        template_folder = os.path.join(sys._MEIPASS, "volta", "templates")
+        static_folder = os.path.join(sys._MEIPASS, "volta", "static")
+        app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
+    else:
+        app = Flask(__name__) 
 
     if config_object is None:
         app.config.from_object(Config)

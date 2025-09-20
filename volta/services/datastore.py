@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any, Dict, Mapping, Optional, Union
-
+import requests
+from io import BytesIO
 import pandas as pd
 
 #from volta.routes.metrics import Metrics
@@ -47,24 +48,28 @@ class DataStore:
         if self._df is not None:
             return self._df
 
+        url = self.config.get("BUCKET_URL")       
+        headers = {"apikey": self.config.get("SUPABASE_KEY")}  
         path = self.config.get("DATA_PATH")
-        if not path or not os.path.exists(path):
-            logger.error("DATA_PATH not found: %s", path)
-            raise FileNotFoundError(
-                f"DATA_PATH not found: {path}. Set VOLTA_DATA_PATH to override."
-            )
 
-        try:
+        if url:
+            try:
+                resp = requests.get(url, headers=headers)
+                resp.raise_for_status()
+                raw = pd.read_parquet(BytesIO(resp.content))
+            except requests.HTTPError as e:
+                if path and os.path.exists(path):
+                    raw = pd.read_parquet(path)
+                else:
+                    raise FileNotFoundError("Cannot fetch remote or local file")
+        elif path and os.path.exists(path):
             raw = pd.read_parquet(path)
-        except Exception:
-            logger.exception("Failed to read parquet at %s", path)
-            raise
+        else:
+            raise FileNotFoundError("No valid DATA_PATH or BUCKET_URL found")
 
-        logger.info("Loaded raw DataFrame: %s rows, %s cols", len(raw), len(raw.columns))
+        logger.info("Loaded raw DataFrame")
         self._df = self._preprocess(raw)
-        logger.info(
-            "Processed DataFrame: %s rows, %s cols", len(self._df), len(self._df.columns)
-        )
+        logger.info("Processed DataFrame")
         return self._df
 
     def get(self, copy: bool = True) -> pd.DataFrame:

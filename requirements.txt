@@ -1,3 +1,5 @@
 flask
 pandas
 pyarrow
+python-dotenv
+requests
