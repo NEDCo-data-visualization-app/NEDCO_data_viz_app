@@ -20,6 +20,7 @@ from .services.datastore import DataStore
 from .services.metrics import Metrics
 import os
 import sys
+from .routes.upload import upload_bp
 
 
 def create_app(
@@ -48,7 +49,7 @@ def create_app(
     app.extensions["datastore"] = datastore
 
     app.register_blueprint(dashboard_bp)
-
+    app.register_blueprint(upload_bp)
     return app
 
 

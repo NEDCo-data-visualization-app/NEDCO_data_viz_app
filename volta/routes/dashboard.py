@@ -111,6 +111,9 @@ def index():
     metrics = get_metrics()
     base = datastore.get(copy=True)
 
+    if base.empty:
+        return render_template("upload.html")
+
     if request.args and no_filters_selected(request.args, base):
         return redirect(url_for("dashboard.index"))
 

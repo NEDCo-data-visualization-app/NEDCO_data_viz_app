@@ -1,7 +1,6 @@
 """Data access and aggregation helpers."""
 
 from __future__ import annotations
-
 import logging
 import os
 from typing import Any, Dict, Mapping, Optional, Union
@@ -51,26 +50,31 @@ class DataStore:
         url = self.config.get("BUCKET_URL")       
         headers = {"apikey": self.config.get("SUPABASE_KEY")}  
         path = self.config.get("DATA_PATH")
+        raw = None
 
         if url:
             try:
-                resp = requests.get(url, headers=headers)
+                resp = requests.get(url, headers=headers, timeout = 60)
                 resp.raise_for_status()
                 raw = pd.read_parquet(BytesIO(resp.content))
-            except requests.HTTPError as e:
-                if path and os.path.exists(path):
-                    raw = pd.read_parquet(path)
-                else:
-                    raise FileNotFoundError("Cannot fetch remote or local file")
-        elif path and os.path.exists(path):
-            raw = pd.read_parquet(path)
-        else:
-            raise FileNotFoundError("No valid DATA_PATH or BUCKET_URL found")
+            except (requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                logger.warning("Could not fetch remote file. Falling back to local file or user upload.")
+        
+        if raw is None:
+            if path and os.path.exists(path):
+                raw = pd.read_parquet(path)
+            else:
+                raw = pd.DataFrame()
 
         logger.info("Loaded raw DataFrame")
         self._df = self._preprocess(raw)
         logger.info("Processed DataFrame")
         return self._df
+    
+    def set_df(self, df: pd.DataFrame) -> None:
+        """Directly set the DataFrame"""
+        self._df = self._preprocess(df)
+        logger.info("DataStore loaded from uploaded file")
 
     def get(self, copy: bool = True) -> pd.DataFrame:
         df = self.load()
