@@ -12,3 +12,11 @@ To run this app locally, run this in the command line (you might need to replace
 ```sh
 python run.py
 ```
+
+## Generating A One Click File for Windows/Mac
+
+To generate a .exec for MacOS and Windows, go to GitHub -> Actions -> Package Into One Click (on the left under "All workflows") -> Run workflow
+
+After completion, go to GitHub -> Actions -> Click the workflow run -> Scroll to "Artifacts" at the bottom and you can see two files: volta-macos and volta-windows. This should download a zip file to your computer which, after extraction, will contain the one-click package
+
+Note: If you are sending these files to other people, first compress into a zip file and then send
