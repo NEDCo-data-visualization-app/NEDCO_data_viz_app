@@ -1,0 +1,48 @@
+name: Build Executables (Runtime Secrets)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    env: 
+      BUCKET_URL: ${{ secrets.BUCKET_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate || .venv\Scripts\activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller python-dotenv
+
+      - name: Build executable with PyInstaller
+        run: |
+          source .venv/bin/activate || .venv\Scripts\activate
+          pyinstaller \
+            --onefile \
+            --name volta_${{ matrix.os }} \
+            --add-data "volta/templates:volta/templates" \
+            --add-data "volta/static:volta/static" \
+            run.py
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: volta-${{ matrix.os }}
+          path: dist/volta_${{ matrix.os }}*
