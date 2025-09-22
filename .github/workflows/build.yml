@@ -4,16 +4,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-latest, windows-latest]
-
-    env: 
+  build-macos:
+    runs-on: macos-latest
+    env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,23 +21,59 @@ jobs:
       - name: Install dependencies
         run: |
           python -m venv .venv
-          source .venv/bin/activate || .venv\Scripts\activate
+          source .venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller python-dotenv
 
-      - name: Build executable with PyInstaller
+      - name: Build Mac executable
         run: |
-          source .venv/bin/activate || .venv\Scripts\activate
+          source .venv/bin/activate
           pyinstaller \
             --onefile \
-            --name volta_${{ matrix.os }} \
+            --name volta_macos \
             --add-data "volta/templates:volta/templates" \
             --add-data "volta/static:volta/static" \
             run.py
 
-      - name: Upload executable artifact
+      - name: Upload Mac executable
         uses: actions/upload-artifact@v4
         with:
-          name: volta-${{ matrix.os }}
-          path: dist/volta_${{ matrix.os }}*
+          name: volta-macos
+          path: dist/volta_macos
+
+  build-windows:
+    runs-on: windows-latest
+    env:
+      BUCKET_URL: ${{ secrets.BUCKET_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+          .\.venv\Scripts\python.exe -m pip install pyinstaller python-dotenv
+
+      - name: Build Windows executable
+        run: |
+          .\.venv\Scripts\python.exe -m PyInstaller \
+            --onefile \
+            --name volta_windows \
+            --add-data "volta/templates;volta/templates" \
+            --add-data "volta/static;volta/static" \
+            run.py
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: volta-windows
+          path: dist/volta_windows.exe
