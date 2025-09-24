@@ -20,7 +20,7 @@
 
           <hr class="my-3"/>
 
-          <!-- Checkbox filters (meterid has special UI: search + multi-select) -->
+          <!-- Checkbox filters -->
           <div class="accordion" id="filtersAccordion">
             {% for col, vals in unique_values.items() %}
               <div class="accordion-item">
@@ -142,6 +142,11 @@
               <h6 class="mb-1">Time series: {{ date_col }} vs Metric</h6>
               <div class="text-muted small mb-2">Values shown are <strong>mean</strong> per selected time bucket.</div>
               <div class="chart-box"><canvas id="lineChart"></canvas></div>
+              <!-- NEW: download button -->
+              <button class="btn btn-outline-secondary btn-sm mt-2"
+                      onclick="downloadChart('lineChart','time_series.png')">
+                Download Chart
+              </button>
             </div>
           </div>
 
@@ -151,6 +156,11 @@
               <h6 class="mb-1">Composition by segment</h6>
               <div class="text-muted small mb-2">Shares are based on the <strong>sum</strong> of the selected metric over current filters.</div>
               <div class="chart-box"><canvas id="pieChart"></canvas></div>
+              <!-- NEW: download button -->
+              <button class="btn btn-outline-secondary btn-sm mt-2"
+                      onclick="downloadChart('pieChart','composition.png')">
+                Download Chart
+              </button>
             </div>
           </div>
 
@@ -160,6 +170,11 @@
               <h6 class="mb-1">Totals by City</h6>
               <div class="text-muted small mb-2">Shows the <strong>sum</strong> of the selected metric grouped by city.</div>
               <div class="chart-box"><canvas id="barChart"></canvas></div>
+              <!-- NEW: download button -->
+              <button class="btn btn-outline-secondary btn-sm mt-2"
+                      onclick="downloadChart('barChart','totals_by_city.png')">
+                Download Chart
+              </button>
             </div>
           </div>
         {% else %}
@@ -203,7 +218,7 @@
                       <div class="fs-5 fw-semibold text-nowrap">{{ "{:,.2f}".format(s.mean) }}</div>
                     </div>
                   </div>
-                 <div class="col-6 col-md-4 col-xl-2">
+                  <div class="col-6 col-md-4 col-xl-2">
                     <div class="p-2 bg-light rounded">
                       <div class="text-muted small">Median</div>
                       <div class="fs-5 fw-semibold text-nowrap">{{ "{:,.2f}".format(s.median) }}</div>
@@ -227,9 +242,15 @@
           {% endfor %}
         {% endif %}
 
+        <!-- Table + NEW download button -->
         <div class="table-responsive">
           {{ preview_html|safe }}
         </div>
+        <button class="btn btn-outline-secondary btn-sm mt-2"
+                onclick="downloadFilteredCSV()">
+          Download Table (CSV)
+        </button>
+
       </div>
     </div>
   </div>
