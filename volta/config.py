@@ -18,14 +18,11 @@ class Config:
     # -------------------------
     # Data paths
     # -------------------------
-    # DuckDB database file
+    # DuckDB database file (main store)
     DUCKDB_PATH = Path(os.getenv("VOLTA_DUCKDB_PATH", "data/warehouse.duckdb"))
 
     # Location of incoming CSVs (from client uploads)
-    CSV_GLOB = os.getenv("VOLTA_CSV_GLOB", "data/*.csv")
-
-    # (Legacy) still allow Parquet path for backwards compatibility
-    DATA_PATH = os.getenv("VOLTA_DATA_PATH", "data/wkfile_shiny.parquet")
+    CSV_GLOB = os.getenv("VOLTA_CSV_GLOB", "data/uploads/*.csv")
 
     # -------------------------
     # Data schema
@@ -33,7 +30,7 @@ class Config:
     DATE_COL = os.getenv("VOLTA_DATE_COL", "chargedate")
 
     # -------------------------
-    # External services
+    # External services (optional legacy path)
     # -------------------------
     BUCKET_URL = os.getenv("BUCKET_URL")
     SUPABASE_KEY = os.getenv("SUPABASE_KEY")
