@@ -162,75 +162,69 @@ def index():
 
 @bp.route("/chart-data", methods=["GET"])
 def chart_data():
+    """Time-series for charts, computed in DuckDB (fast)."""
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
     metrics = get_metrics()
+
+    # Use full base for metric validation and to derive available columns
     base = datastore.get(copy=False)
+
+    # Build params object
     params = build_params(request.args, base)
-    filtered = params.apply(base, date_col)
 
-    metric = metrics.validate(filtered, params.metric)
-    if not metric or date_col not in filtered.columns or filtered.empty:
+    # Validate metric against available columns
+    metric = metrics.validate(base, params.metric)
+    if not metric:
         return jsonify(
-            {
-                "labels": [],
-                "values": [],
-                "metric_label": params.metric or "",
-                "date_col": date_col,
-            }
+            {"labels": [], "values": [], "metric_label": params.metric or "", "date_col": date_col}
         )
 
-    series = filtered.dropna(subset=[date_col]).copy()
-    series[date_col] = pd.to_datetime(series[date_col], errors="coerce")
-    series = series.dropna(subset=[date_col])
-    if series.empty:
-        return jsonify(
-            {
-                "labels": [],
-                "values": [],
-                "metric_label": metrics.label(metric),
-                "date_col": date_col,
-            }
-        )
-
-    rule = current_app.config["FREQ_RULE"].get(params.freq, "D")
-
-    ts = series.set_index(series[date_col])
-    grp = (
-        ts[metric]
-        .resample(rule, label="left", closed="left")
-        .mean()
-        .dropna()
-        .sort_index()
+    # Build WHERE clause + params using FilterParams helper
+    clause, sql_params = params.to_sql_where(
+        date_col=date_col,
+        available_columns=base.columns,
     )
 
-    if grp is None or len(grp) == 0:
+    # Frequency mapping via helper (D/W/M -> day/week/month)
+    trunc_unit = params.trunc_unit()
+
+    # SQL aggregation
+    sql = f"""
+        SELECT
+          date_trunc('{trunc_unit}', {date_col}) AS bucket,
+          AVG({metric}) AS value
+        FROM prod.sales
+        WHERE {clause}
+        GROUP BY 1
+        ORDER BY 1;
+    """
+
+    df = datastore.run_query(sql, sql_params)
+
+    if df is None or df.empty:
         return jsonify(
-            {
-                "labels": [],
-                "values": [],
-                "metric_label": metrics.label(metric),
-                "date_col": date_col,
-            }
+            {"labels": [], "values": [], "metric_label": metrics.label(metric), "date_col": date_col}
         )
 
-    labels = [
-        idx.strftime("%Y-%m") if params.freq == "M" else idx.date().isoformat()
-        for idx in grp.index
-    ]
-    values = [float(v) for v in grp.values]
+    # Format labels per frequency
+    def _fmt(ts: pd.Timestamp) -> str:
+        if params.freq == "M":
+            return pd.to_datetime(ts).strftime("%Y-%m")
+        return pd.to_datetime(ts).date().isoformat()
+
+    labels = [_fmt(v) for v in df["bucket"]]
+    values = [float(v) if pd.notna(v) else 0.0 for v in df["value"]]
+
     return jsonify(
-        {
-            "labels": labels,
-            "values": values,
-            "metric_label": metrics.label(metric),
-            "date_col": date_col,
-        }
+        {"labels": labels, "values": values, "metric_label": metrics.label(metric), "date_col": date_col}
     )
+
 
 
 @bp.route("/pie-data", methods=["GET"])
 def pie_data():
+    # (kept as-is; still uses pandas for now)
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
     metrics = get_metrics()
@@ -294,6 +288,7 @@ def pie_data():
 
 @bp.route("/bar-data", methods=["GET"])
 def bar_data():
+    # (kept as-is; still uses pandas for now)
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
     metrics = get_metrics()

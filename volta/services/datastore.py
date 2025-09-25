@@ -34,8 +34,6 @@ class DataStore:
             db_path = str(self.config.get("DUCKDB_PATH"))
             os.makedirs(os.path.dirname(db_path), exist_ok=True)
             self._con = duckdb.connect(db_path)
-            # optional tuning knobs:
-            # self._con.execute("PRAGMA threads = {}".format(max(2, os.cpu_count() or 4)))
         return self._con
 
     def _table_exists(self) -> bool:
@@ -58,7 +56,6 @@ class DataStore:
         con.execute("CREATE SCHEMA IF NOT EXISTS prod;")
         con.execute("DROP TABLE IF EXISTS prod.sales;")
 
-        # If no files match, create an empty table to keep the app happy
         import glob as _glob
         files = _glob.glob(csv_glob)
         if not files:
@@ -76,10 +73,61 @@ class DataStore:
         con.execute("ANALYZE prod.sales;")
         logger.info("DuckDB table prod.sales rebuilt and analyzed.")
 
-        # Invalidate in-memory cache
+        # Optional: create helpful indexes
+        con.execute("CREATE INDEX IF NOT EXISTS idx_sales_country ON prod.sales(country);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_sales_category ON prod.sales(category);")
+
         self._df = None
 
-    # ---------- Existing pandas pipeline compatibility ----------
+    # ---------- Query helpers ----------
+
+    def run_query(self, sql: str, params=None) -> pd.DataFrame:
+        """Execute SQL on DuckDB and return as pandas DataFrame."""
+        con = self._connect()
+        return con.execute(sql, params or []).df()
+
+    def timeseries_daily(self, date_from, date_to, country=None, category=None) -> pd.DataFrame:
+        sql = f"""
+        SELECT
+          date_trunc('day', {self.config.get("DATE_COL", "chargedate")}) AS day,
+          SUM(amount) AS total_amount
+        FROM prod.sales
+        WHERE {self.config.get("DATE_COL", "chargedate")} BETWEEN ? AND ?
+          AND (? IS NULL OR country = ?)
+          AND (? IS NULL OR category = ?)
+        GROUP BY 1
+        ORDER BY 1;
+        """
+        params = [date_from, date_to, country, country, category, category]
+        return self.run_query(sql, params)
+
+    def top_categories(self, date_from, date_to, limit=10) -> pd.DataFrame:
+        sql = f"""
+        SELECT
+          category,
+          SUM(amount) AS total_amount
+        FROM prod.sales
+        WHERE {self.config.get("DATE_COL", "chargedate")} BETWEEN ? AND ?
+        GROUP BY category
+        ORDER BY total_amount DESC
+        LIMIT ?;
+        """
+        return self.run_query(sql, [date_from, date_to, limit])
+
+    def table_page(self, date_from, date_to, country=None, limit=100, offset=0) -> pd.DataFrame:
+        sql = f"""
+        SELECT {self.config.get("DATE_COL", "chargedate")} AS chargedate,
+               country, category, amount
+        FROM prod.sales
+        WHERE {self.config.get("DATE_COL", "chargedate")} BETWEEN ? AND ?
+          AND (? IS NULL OR country = ?)
+        ORDER BY {self.config.get("DATE_COL", "chargedate")} DESC
+        LIMIT ? OFFSET ?;
+        """
+        params = [date_from, date_to, country, country, limit, offset]
+        return self.run_query(sql, params)
+
+    # ---------- Existing pandas compatibility ----------
 
     @staticmethod
     def _clean_nan_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -99,7 +147,6 @@ class DataStore:
             and date_col in df.columns
             and not pd.api.types.is_datetime64_any_dtype(df[date_col])
         ):
-            # original format looked like '%d-%b-%y'
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce", format="%d-%b-%y")
 
         for numcol in self.metrics.mapping.keys():
@@ -109,22 +156,14 @@ class DataStore:
         return df
 
     def _ensure_data(self) -> None:
-        """Make sure the DuckDB has prod.sales; build it if needed."""
         if not self._table_exists():
             logger.info("DuckDB table prod.sales missing; attempting to build from CSV.")
             self.rebuild_from_csv()
 
     def load(self) -> pd.DataFrame:
-        """Load full table from DuckDB (then preprocess) and cache in-memory.
-
-        NOTE: This preserves your current app behavior (a single DataFrame in memory).
-        Later we can switch routes to query DuckDB directly for even better performance.
-        """
         if self._df is not None:
             return self._df
 
-        # If a remote object store URL is configured for a parquet blob, keep the fallback
-        # (optional legacy path—can be removed if you won't use BUCKET_URL anymore)
         url = self.config.get("BUCKET_URL")
         headers = {"apikey": self.config.get("SUPABASE_KEY")}
         raw = None
@@ -134,14 +173,11 @@ class DataStore:
                 resp = requests.get(url, headers=headers, timeout=60)
                 resp.raise_for_status()
                 raw = pd.read_parquet(BytesIO(resp.content))
-                logger.info("Loaded remote parquet from BUCKET_URL into pandas (legacy path).")
+                logger.info("Loaded remote parquet from BUCKET_URL (legacy).")
             except (requests.HTTPError, requests.ConnectionError, requests.Timeout):
-                logger.warning(
-                    "Could not fetch remote file. Falling back to DuckDB local table."
-                )
+                logger.warning("Could not fetch remote file. Falling back to DuckDB local table.")
 
         if raw is None:
-            # Preferred path: load from DuckDB
             self._ensure_data()
             con = self._connect()
             try:
@@ -156,11 +192,9 @@ class DataStore:
         return self._df
 
     def set_df(self, df: pd.DataFrame) -> None:
-        """Directly set the DataFrame AND update DuckDB (replace prod.sales)."""
         self._df = self._preprocess(df)
         logger.info("DataStore loaded from uploaded file (in-memory).")
 
-        # Also persist to DuckDB so future loads use the DB
         con = self._connect()
         con.execute("CREATE SCHEMA IF NOT EXISTS prod;")
         con.execute("DROP TABLE IF EXISTS prod.sales;")
