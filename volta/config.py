@@ -22,7 +22,7 @@ class Config:
     DUCKDB_PATH = Path(os.getenv("VOLTA_DUCKDB_PATH", "data/warehouse.duckdb"))
 
     # Location of incoming CSVs (from client uploads)
-    CSV_GLOB = os.getenv("VOLTA_CSV_GLOB", "data/uploads/*.csv")
+    CSV_GLOB = os.getenv("VOLTA_CSV_GLOB", "data/*.csv")
 
     # (Legacy) still allow Parquet path for backwards compatibility
     DATA_PATH = os.getenv("VOLTA_DATA_PATH", "data/wkfile_shiny.parquet")
