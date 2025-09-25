@@ -4,3 +4,4 @@ pyarrow
 python-dotenv
 requests
 dotenv
+duckdb
