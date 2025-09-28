@@ -1,0 +1,19 @@
+name: Heartbeat Call For Supabase
+
+on:
+  schedule:
+    - cron: "0 12 * * *" 
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    env:
+      BUCKET_URL: ${{ secrets.BUCKET_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+    steps:
+      - name: Heartbeat call to Supabase bucket
+        run: |
+          curl -X GET "$BUCKET_URL" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY"
