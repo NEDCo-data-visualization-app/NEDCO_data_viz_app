@@ -173,7 +173,9 @@ class DataStore:
                 resp = requests.get(url, headers=headers, timeout=60)
                 resp.raise_for_status()
                 raw = pd.read_parquet(BytesIO(resp.content))
-                logger.info("Loaded remote parquet from BUCKET_URL (legacy).")
+                logger.info("Loaded remote parquet from BUCKET_URL.")
+                self.set_df(raw)
+                logger.info("Set df as fetched parquet file")
             except (requests.HTTPError, requests.ConnectionError, requests.Timeout):
                 logger.warning("Could not fetch remote file. Falling back to DuckDB local table.")
 
