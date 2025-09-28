@@ -173,9 +173,10 @@ def chart_data():
     # Build params object
     params = build_params(request.args, base)
 
-    # Validate metric against available columns
-    metric = metrics.validate(base, params.metric)
-    if not metric:
+    requested_metrics = (params.metric or "").split(",")
+    validated_metrics = [m for m in requested_metrics if metrics.validate(base, m)]
+
+    if not validated_metrics:
         return jsonify(
             {"labels": [], "values": [], "metric_label": params.metric or "", "date_col": date_col}
         )
@@ -189,11 +190,12 @@ def chart_data():
     # Frequency mapping via helper (D/W/M -> day/week/month)
     trunc_unit = params.trunc_unit()
 
-    # SQL aggregation
+    # SQL aggregation for all metrics
+    metric_sql = ", ".join([f"AVG({m}) AS {m}" for m in validated_metrics])
     sql = f"""
         SELECT
           date_trunc('{trunc_unit}', {date_col}) AS bucket,
-          AVG({metric}) AS value
+          {metric_sql}
         FROM prod.sales
         WHERE {clause}
         GROUP BY 1
@@ -204,7 +206,12 @@ def chart_data():
 
     if df is None or df.empty:
         return jsonify(
-            {"labels": [], "values": [], "metric_label": metrics.label(metric), "date_col": date_col}
+            {
+                "labels": [],
+                "values": {m: [] for m in validated_metrics},
+                "metric_labels": {m: metrics.label(m) for m in validated_metrics},
+                "date_col": date_col
+            }
         )
 
     # Format labels per frequency
@@ -214,10 +221,19 @@ def chart_data():
         return pd.to_datetime(ts).date().isoformat()
 
     labels = [_fmt(v) for v in df["bucket"]]
-    values = [float(v) if pd.notna(v) else 0.0 for v in df["value"]]
+
+    # Build values dictionary keyed by metric
+    values_dict = {}
+    for m in validated_metrics:
+        values_dict[m] = [float(v) if pd.notna(v) else 0.0 for v in df[m]]
 
     return jsonify(
-        {"labels": labels, "values": values, "metric_label": metrics.label(metric), "date_col": date_col}
+        {
+            "labels": labels,
+            "values": values_dict,
+            "metric_labels": {m: metrics.label(m) for m in validated_metrics},
+            "date_col": date_col
+        }
     )
 
 

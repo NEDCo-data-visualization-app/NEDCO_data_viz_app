@@ -115,12 +115,53 @@
           <div class="row g-2 align-items-end mb-3">
             <div class="col-12 col-md-4">
               <label class="form-label">Metric</label>
-              <select id="metricSelect" class="form-select">
-                {% for col, label in chart_metrics %}
-                  <option value="{{ col }}" {% if col == current_metric %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
+              <div class="dropdown">
+                <button class="form-select text-start" type="button" id="metricDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                  Select metrics
+                </button>
+                <div class="dropdown-menu p-2" aria-labelledby="metricDropdown" style="max-height: none;">
+                  {% for col, label in chart_metrics %}
+                    <div class="form-check">
+                      <input class="form-check-input metric-checkbox" type="checkbox" value="{{ col }}" id="metricCheck{{ loop.index }}"
+                        {% if col == current_metric %}checked{% endif %}>
+                      <label class="form-check-label" for="metricCheck{{ loop.index }}">{{ label }}</label>
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
             </div>
+
+            <script>
+              document.addEventListener('DOMContentLoaded', () => {
+                const dropdownBtn = document.getElementById('metricDropdown');
+                const checkboxes = document.querySelectorAll('.metric-checkbox');
+
+                function updateDropdownText() {
+                  const selected = Array.from(checkboxes)
+                    .filter(cb => cb.checked)
+                    .map(cb => cb.nextElementSibling.textContent);
+
+                  if (selected.length === 0 && checkboxes.length > 0) {
+                    checkboxes[0].checked = true;
+                    selected.push(checkboxes[0].nextElementSibling.textContent);
+                  }
+
+                  dropdownBtn.textContent = selected.join(', ');
+                }
+
+                checkboxes.forEach(cb => {
+                cb.addEventListener('change', async () => {
+                  const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);
+                  if (checkedBoxes.length > 2) {
+                    cb.checked = false;
+                    alert("You can select at most 2 metrics.");
+                  }
+                });
+              });
+
+                updateDropdownText(); 
+              });
+            </script>
 
             <div class="col-12 col-md-4">
               <label class="form-label">Granularity</label>
@@ -131,9 +172,6 @@
               </select>
             </div>
 
-            <div class="col-12 col-md-4 d-flex gap-2">
-              <button id="refreshCharts" type="button" class="btn btn-primary mt-4 mt-md-0">Update Chart</button>
-            </div>
           </div>
 
           <!-- Time series -->
@@ -151,18 +189,7 @@
           </div>
 
           <!-- Composition donut -->
-          <div class="card border-0 shadow-sm mb-3">
-            <div class="card-body">
-              <h6 class="mb-1">Composition by segment</h6>
-              <div class="text-muted small mb-2">Shares are based on the <strong>sum</strong> of the selected metric over current filters.</div>
-              <div class="chart-box"><canvas id="pieChart"></canvas></div>
-              <!-- NEW: download button -->
-              <button class="btn btn-outline-secondary btn-sm mt-2"
-                      onclick="downloadChart('pieChart','composition.png')">
-                Download Chart
-              </button>
-            </div>
-          </div>
+          <div class="row g-3" id="pieChartsRow"></div>
 
           <!-- Bar chart by city -->
           <div class="card border-0 shadow-sm mb-3">

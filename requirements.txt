@@ -5,4 +5,7 @@ python-dotenv
 requests
 dotenv
 duckdb
-duckdb
+langchain
+openai
+matplotlib
+langchain-community
