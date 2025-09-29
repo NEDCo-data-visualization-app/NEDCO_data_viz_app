@@ -22,6 +22,9 @@ from volta.utils.filter_params import FilterParams
 
 bp = Blueprint("dashboard", __name__)
 
+# Initial cap to avoid rendering tens of thousands of checkboxes on first load
+DEFAULT_METERID_LIMIT = 500
+
 
 def get_metrics():
     return current_app.extensions["metrics"]
@@ -108,7 +111,7 @@ def no_filters_selected(args, base_df: pd.DataFrame) -> bool:
 
 @bp.route("/", methods=["GET"])
 def index():
-    date_col = current_app.config["DATE_COL"]
+    date_col = current_app.config()["DATE_COL"] if callable(current_app.config) else current_app.config["DATE_COL"]
     datastore = get_datastore()
     metrics = get_metrics()
     base = datastore.get(copy=True)
@@ -122,7 +125,43 @@ def index():
     params = build_params(request.args, base)
     after = params.apply(base, date_col)
 
+    # Build defaults from filtered df for most facets
     unique_values = build_unique_values(after)
+
+    # ---- OVERRIDE heavy facets from FULL TABLE with a sane cap to avoid UI lag ----
+    meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
+
+    if "meterid" in base.columns:
+        try:
+            # Pull distinct meterids from the full table, but cap the count for initial render
+            meterids = datastore.run_query(
+                f"""
+                SELECT DISTINCT meterid AS v
+                FROM prod.sales
+                WHERE meterid IS NOT NULL
+                ORDER BY v
+                LIMIT {int(meter_cap)};
+                """
+            )["v"].astype(str).tolist()
+            unique_values["meterid"] = meterids
+        except Exception:
+            # Fall back to whatever was computed from `after`
+            pass
+
+    if "loc" in base.columns:
+        try:
+            locs = datastore.run_query(
+                """
+                SELECT DISTINCT loc AS v
+                FROM prod.sales
+                WHERE loc IS NOT NULL
+                ORDER BY v;
+                """
+            )["v"].astype(str).tolist()
+            unique_values["loc"] = locs
+        except Exception:
+            pass
+    # -------------------------------------------------------------------------------
 
     start_value = end_value = ""
     if date_col in after.columns and len(after) > 0:
@@ -235,7 +274,6 @@ def chart_data():
             "date_col": date_col
         }
     )
-
 
 
 @bp.route("/pie-data", methods=["GET"])
@@ -396,6 +434,42 @@ def health():
     except Exception as exc:  # pragma: no cover - defensive logging path
         current_app.logger.exception("Healthcheck failed")
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# --- New: on-demand meterid options endpoint (for search-as-you-type) ---
+@bp.route("/options/meterid", methods=["GET"])
+def options_meterid():
+    """
+    Returns up to 200 distinct meterid values, optionally filtered by:
+      - q: substring match (case-insensitive)
+      - loc: exact location match
+    Example:
+      /options/meterid?q=123
+      /options/meterid?loc=Techiman&q=45
+    """
+    ds = get_datastore()
+    q = (request.args.get("q") or "").strip()
+    loc = request.args.get("loc")
+    limit = int(request.args.get("limit") or 200)
+
+    sql = """
+        SELECT DISTINCT meterid AS v
+        FROM prod.sales
+        WHERE meterid IS NOT NULL
+    """
+    params = []
+    if loc:
+        sql += " AND CAST(loc AS VARCHAR) = ?"
+        params.append(loc)
+    if q:
+        sql += " AND CAST(meterid AS VARCHAR) ILIKE '%' || ? || '%'"
+        params.append(q)
+
+    sql += " ORDER BY v LIMIT ?"
+    params.append(limit)
+
+    rows = ds.run_query(sql, params)
+    return jsonify(rows["v"].astype(str).tolist())
 
 
 __all__ = ["bp"]

@@ -38,23 +38,15 @@
                       {% set selected = args.getlist(col) %}
 
                       {% if col|lower == 'meterid' %}
-                        <!-- Meter ID search + multi-select -->
+                        <!-- Meter ID search + multi-select (dynamic; list populated by charts.js via /options/meterid) -->
                         <div class="mb-2">
                           <input id="meteridSearch"
                                  type="text"
                                  class="form-control filter-search-input"
-                                 data-filter-target="#meteridList"
-                                 placeholder="Search meterid">
+                                 placeholder="Search meterid (type to load)">
                         </div>
-                        <div id="meteridList" class="filter-wrap">
-                          {% for v in vals %}
-                            <label class="filter-item meterid-item">
-                              <input type="checkbox" name="{{ col }}" value="{{ v }}"
-                                     {% if v in selected %}checked{% endif %}>
-                              <span class="label-text">{{ v }}</span>
-                            </label>
-                          {% endfor %}
-                        </div>
+                        <div id="meteridList" class="filter-wrap"></div>
+
                       {% elif col|lower == 'loc' %}
                         <!-- Location search + multi-select -->
                         <div class="mb-2">
@@ -73,14 +65,15 @@
                             </label>
                           {% endfor %}
                         </div>
+
                       {% else %}
                         <!-- Default checkbox list -->
                         <div class="filter-wrap">
                           {% for v in vals %}
-                            <label>
+                            <label class="filter-item">
                               <input type="checkbox" name="{{ col }}" value="{{ v }}"
                                      {% if v in selected %}checked{% endif %}>
-                              {{ v }}
+                              <span class="label-text">{{ v }}</span>
                             </label>
                           {% endfor %}
                         </div>
@@ -131,37 +124,7 @@
               </div>
             </div>
 
-            <script>
-              document.addEventListener('DOMContentLoaded', () => {
-                const dropdownBtn = document.getElementById('metricDropdown');
-                const checkboxes = document.querySelectorAll('.metric-checkbox');
-
-                function updateDropdownText() {
-                  const selected = Array.from(checkboxes)
-                    .filter(cb => cb.checked)
-                    .map(cb => cb.nextElementSibling.textContent);
-
-                  if (selected.length === 0 && checkboxes.length > 0) {
-                    checkboxes[0].checked = true;
-                    selected.push(checkboxes[0].nextElementSibling.textContent);
-                  }
-
-                  dropdownBtn.textContent = selected.join(', ');
-                }
-
-                checkboxes.forEach(cb => {
-                cb.addEventListener('change', async () => {
-                  const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);
-                  if (checkedBoxes.length > 2) {
-                    cb.checked = false;
-                    alert("You can select at most 2 metrics.");
-                  }
-                });
-              });
-
-                updateDropdownText(); 
-              });
-            </script>
+            <!-- Removed inline script: metric dropdown logic now lives in charts.js -->
 
             <div class="col-12 col-md-4">
               <label class="form-label">Granularity</label>
@@ -180,7 +143,6 @@
               <h6 class="mb-1">Time series: {{ date_col }} vs Metric</h6>
               <div class="text-muted small mb-2">Values shown are <strong>mean</strong> per selected time bucket.</div>
               <div class="chart-box"><canvas id="lineChart"></canvas></div>
-              <!-- NEW: download button -->
               <button class="btn btn-outline-secondary btn-sm mt-2"
                       onclick="downloadChart('lineChart','time_series.png')">
                 Download Chart
@@ -197,7 +159,6 @@
               <h6 class="mb-1">Totals by City</h6>
               <div class="text-muted small mb-2">Shows the <strong>sum</strong> of the selected metric grouped by city.</div>
               <div class="chart-box"><canvas id="barChart"></canvas></div>
-              <!-- NEW: download button -->
               <button class="btn btn-outline-secondary btn-sm mt-2"
                       onclick="downloadChart('barChart','totals_by_city.png')">
                 Download Chart

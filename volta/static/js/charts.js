@@ -1,5 +1,5 @@
 (function () {
-  // Optional: nicer line defaults
+  // ---------- Chart.js defaults ----------
   if (window.Chart) {
     Chart.defaults.datasets.line.tension = 0.45;
     Chart.defaults.datasets.line.cubicInterpolationMode = 'monotone';
@@ -7,6 +7,7 @@
     Chart.defaults.elements.point.radius = 2;
   }
 
+  // ---------- URL helpers ----------
   function urlWithFilters(path, extra) {
     const qs = new URLSearchParams(window.location.search);
     for (const [k, v] of Object.entries(extra || {})) {
@@ -32,11 +33,29 @@
     }
   }
 
+  // ---------- Metric dropdown text (moved from template) ----------
+  function updateMetricDropdownText() {
+    const dropdownBtn = document.getElementById('metricDropdown');
+    const checkboxes = document.querySelectorAll('.metric-checkbox');
+    if (!dropdownBtn || !checkboxes.length) return;
+
+    const checked = Array.from(checkboxes).filter(cb => cb.checked);
+    // Ensure at least one metric selected
+    if (checked.length === 0) {
+      checkboxes[0].checked = true;
+    }
+    const selectedLabels = Array.from(checkboxes)
+      .filter(cb => cb.checked)
+      .map(cb => cb.nextElementSibling ? cb.nextElementSibling.textContent : cb.value);
+    dropdownBtn.textContent = selectedLabels.join(', ');
+  }
+
+  // ---------- Charts ----------
   function drawLine(seriesDict, canvasEl) {
     if (!window.Chart || !canvasEl) return;
 
-    const metrics = Object.keys(seriesDict.values || {});
-    const labels = seriesDict.labels || [];
+    const metrics = Object.keys(seriesDict?.values || {});
+    const labels = seriesDict?.labels || [];
 
     if (!labels.length) {
       canvasEl.parentElement.innerHTML = '<div class="text-muted text-center py-4">No time-series data for current filters.</div>';
@@ -89,12 +108,11 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        scales: scales,
+        scales,
         plugins: { legend: { display: true }, tooltip: { mode: 'index', intersect: false } }
       }
     });
   }
-
 
   function drawPie(series, canvasEl) {
     if (!window.Chart || !canvasEl) return;
@@ -134,7 +152,6 @@
     });
   }
 
-  // Bar chart (sum by city)
   function drawBar(seriesList, canvasEl) {
     if (!window.Chart || !canvasEl) return;
     const ctx = canvasEl.getContext('2d');
@@ -166,14 +183,14 @@
 
     const scales = {
       x: {
-        title: { display: true, text: 'City'},
-        ticks: { maxRotation: 45, minRotation: 0 } 
+        title: { display: true, text: 'City' },
+        ticks: { maxRotation: 45, minRotation: 0 }
       },
       y: {
         type: 'linear',
         position: 'left',
         beginAtZero: true,
-        title: { display: true, text: datasets[0]?.label || ''},
+        title: { display: true, text: datasets[0]?.label || '' },
         ticks: { maxRotation: 0 }
       }
     };
@@ -195,7 +212,7 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        scales: scales,
+        scales,
         plugins: {
           legend: { display: true },
           tooltip: { callbacks: { label: (tt) => `${tt.dataset.label} (${tt.label}): ${tt.formattedValue}` } }
@@ -204,41 +221,40 @@
     });
   }
 
-  // Simple debounce
+  // ---------- Debounce ----------
   function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+  // ---------- Charts init ----------
   function initCharts() {
     const freqSelect = document.getElementById('freqSelect');
     const lineEl    = document.getElementById('lineChart');
     const barEl     = document.getElementById('barChart');
-    const pieRow    = document.getElementById('pieChartsRow'); 
+    const pieRow    = document.getElementById('pieChartsRow');
     const checkboxes = document.querySelectorAll('.metric-checkbox');
 
     if (!checkboxes.length || !freqSelect || !lineEl) return;
 
+    // Enforce max 2 metrics + keep dropdown text synced
     checkboxes.forEach(cb => {
-    cb.addEventListener('change', () => {
-      const checked = Array.from(checkboxes).filter(c => c.checked);
-      if (checked.length > 2) {
-        cb.checked = false;
-        alert("You can select at most 2 metrics.");
-      }
-      updateDropdownText(); 
+      cb.addEventListener('change', () => {
+        const checked = Array.from(checkboxes).filter(c => c.checked);
+        if (checked.length > 2) {
+          cb.checked = false;
+          alert("You can select at most 2 metrics.");
+        }
+        updateMetricDropdownText();
+      });
     });
-  });
 
     const refresh = debounce(async () => {
       const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);
       if (checkedBoxes.length > 2) {
         checkedBoxes.slice(2).forEach(cb => cb.checked = false);
         alert("You can select at most 2 metrics.");
-        updateDropdownText(); 
+        updateMetricDropdownText();
         return;
       }
-      const metrics = Array.from(checkboxes)
-        .filter(cb => cb.checked)
-        .map(cb => cb.value);
-
+      const metrics = checkedBoxes.map(cb => cb.value);
       const freq = freqSelect.value;
 
       updateUrlQuery(metrics.join(','), freq);
@@ -248,7 +264,7 @@
       drawLine(series, lineEl);
 
       if (pieRow) {
-        pieRow.innerHTML = ''; 
+        pieRow.innerHTML = '';
         for (let i = 0; i < metrics.length; i++) {
           const chartId = i === 0 ? 'pieChart' : 'pieChart2';
           const colClass = metrics.length === 1 ? 'col-12' : 'col-12 col-md-6';
@@ -276,6 +292,7 @@
           drawPie(chartData, document.getElementById(chartId));
         }
       }
+
       if (barEl && metrics.length) {
         const barSeriesList = await Promise.all(
           metrics.map(metric => fetchJson(urlWithFilters('/bar-data', { metric })))
@@ -285,25 +302,23 @@
     }, 100);
 
     checkboxes.forEach(cb => cb.addEventListener('change', refresh));
-    freqSelect.addEventListener('change', refresh);
+    if (freqSelect) freqSelect.addEventListener('change', refresh);
 
-    const btn = document.getElementById('refreshCharts');
-    if (btn) btn.addEventListener('click', refresh);
-
-    refresh(); 
+    // Initial sync & draw
+    updateMetricDropdownText();
+    refresh();
   }
 
-
-  // ---- NEW: generic live search / reorder with "pin selected" --------------
+  // ---------- Generic filter search (keeps selected pinned) ----------
   function initFilterSearch() {
     const inputs = document.querySelectorAll('.filter-search-input[data-filter-target]');
     if (!inputs.length) return;
 
     function scoreItem(text, q) {
-      if (!q) return 2;                 // neutral if empty
-      if (text.startsWith(q)) return 0; // best: starts with
-      if (text.includes(q))  return 1;  // then: contains
-      return 2;                         // otherwise: last
+      if (!q) return 2;
+      if (text.startsWith(q)) return 0;
+      if (text.includes(q))  return 1;
+      return 2;
     }
 
     function reorder(input, list) {
@@ -334,9 +349,7 @@
         return ta.localeCompare(tb);
       });
 
-      for (const el of [...selected, ...unselected]) {
-        list.appendChild(el);
-      }
+      for (const el of [...selected, ...unselected]) list.appendChild(el);
     }
 
     inputs.forEach((input) => {
@@ -351,9 +364,69 @@
       run();
     });
   }
-  // --------------------------------------------------------------------------
 
-  // ------- NEW: Export helpers (exposed globally for inline onclick) --------
+  // ---------- MeterID dynamic loader (search-as-you-type) ----------
+  function initMeteridDynamic() {
+    const input = document.getElementById('meteridSearch');
+    const list  = document.getElementById('meteridList');
+    if (!input || !list) return; // nothing to do if template doesn't have these
+
+    // read current selections from URL (?meterid=...)
+    const preselected = new URLSearchParams(window.location.search).getAll('meterid').map(String);
+    const selected = new Set(preselected);
+
+    function render(items) {
+      // keep selected at the top; merge with fetched items
+      const merged = [...new Set([...Array.from(selected), ...items.map(String)])];
+      list.innerHTML = merged.map(v => {
+        const checked = selected.has(v) ? 'checked' : '';
+        return `
+          <label class="filter-item meterid-item">
+            <input type="checkbox" name="meterid" value="${v}" ${checked}>
+            <span class="label-text">${v}</span>
+          </label>
+        `;
+      }).join('');
+
+      // maintain selected set as user toggles
+      list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          if (cb.checked) selected.add(cb.value);
+          else selected.delete(cb.value);
+        });
+      });
+    }
+
+    function currentLoc() {
+      const params = new URLSearchParams(window.location.search);
+      const locs = params.getAll('loc');
+      return locs.length === 1 ? locs[0] : '';
+    }
+
+    let ctrl;
+    function fetchItems(q) {
+      if (ctrl) ctrl.abort();
+      ctrl = new AbortController();
+      const url = new URL('/options/meterid', window.location.origin);
+      if (q) url.searchParams.set('q', q);
+      const loc = currentLoc();
+      if (loc) url.searchParams.set('loc', loc);
+      url.searchParams.set('limit', '200');
+      return fetch(url.toString(), { signal: ctrl.signal }).then(r => r.json());
+    }
+
+    function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+    const onType = debounce(() => {
+      list.innerHTML = '<div class="text-muted small px-2 py-1">Loading…</div>';
+      fetchItems(input.value).then(render).catch(() => {});
+    }, 250);
+
+    // initial load & bindings
+    fetchItems('').then(render).catch(() => {});
+    input.addEventListener('input', onType);
+  }
+
+  // ---------- Export helpers ----------
   function downloadTableAsCSV(tableEl, filename) {
     const rows = tableEl.querySelectorAll('tr');
     const csv = [];
@@ -375,7 +448,7 @@
     document.body.removeChild(link);
   }
 
-  // Expose for buttons in index.html:
+  // expose for inline buttons
   window.downloadChart = function (chartId, filename) {
     const canvas = document.getElementById(chartId);
     if (!canvas) return;
@@ -396,26 +469,15 @@
     downloadTableAsCSV(table, filename || 'table_export.csv');
   };
 
-  // NEW: download the entire filtered dataset from the server
   window.downloadFilteredCSV = function () {
     const url = urlWithFilters('/download-csv');
     window.location.assign(url);
   };
-  // --------------------------------------------------------------------------
 
+  // ---------- Boot ----------
   document.addEventListener('DOMContentLoaded', () => {
     initCharts();
-    initFilterSearch(); // NEW
-    const metricSelect = document.getElementById('metricSelect');
-    if (metricSelect) {
-      metricSelect.addEventListener('change', function() {
-        const selected = Array.from(this.selectedOptions);
-        if (selected.length > 2) {
-          selected.slice(2).forEach(opt => opt.selected = false);
-          alert("You can select at most 2 metrics for the chart.");
-        }
-      });
-    }
-
+    initFilterSearch();
+    initMeteridDynamic(); // enable fast 68k meterid search
   });
 })();
