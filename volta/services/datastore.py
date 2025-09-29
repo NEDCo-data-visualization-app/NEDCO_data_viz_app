@@ -51,7 +51,9 @@ class DataStore:
     def rebuild_from_csv(self) -> None:
         """Full rebuild of prod.sales from CSVs matched by CSV_GLOB."""
         con = self._connect()
-        csv_glob = self.config.get("CSV_GLOB", "data/uploads/*.csv")
+        csv_glob = self.config.get("CSV_GLOB", "data/*.csv")
+        date_col = self.config.get("DATE_COL", "chargedate")
+        date_fmt = self.config.get("DATE_FMT", "%d-%b-%y")  # add DATE_FMT to config if needed
 
         con.execute("CREATE SCHEMA IF NOT EXISTS prod;")
         con.execute("DROP TABLE IF EXISTS prod.sales;")
@@ -63,23 +65,28 @@ class DataStore:
             con.execute("CREATE TABLE prod.sales AS SELECT * FROM (SELECT 1 AS dummy) WHERE 1=0;")
         else:
             logger.info("Building prod.sales from %d CSV file(s): %s", len(files), csv_glob)
+            # Read CSVs, then normalize chargedate to DATE
             con.execute(
                 f"""
                 CREATE TABLE prod.sales AS
-                SELECT * FROM read_csv_auto('{csv_glob}', HEADER=TRUE);
+                WITH raw AS (
+                  SELECT * FROM read_csv_auto('{csv_glob}', HEADER=TRUE)
+                )
+                SELECT
+                  CAST(try_strptime({date_col}, '{date_fmt}') AS DATE) AS {date_col},
+                  * EXCLUDE ({date_col})
+                FROM raw;
                 """
             )
 
         con.execute("ANALYZE prod.sales;")
         logger.info("DuckDB table prod.sales rebuilt and analyzed.")
 
-        # Optional: create helpful indexes
+        # Optional: helpful indexes
         con.execute("CREATE INDEX IF NOT EXISTS idx_sales_country ON prod.sales(country);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_sales_category ON prod.sales(category);")
 
         self._df = None
-
-    # ---------- Query helpers ----------
 
     def run_query(self, sql: str, params=None) -> pd.DataFrame:
         """Execute SQL on DuckDB and return as pandas DataFrame."""
@@ -197,11 +204,21 @@ class DataStore:
         self._df = self._preprocess(df)
         logger.info("DataStore loaded from uploaded file (in-memory).")
 
+        date_col = self.config.get("DATE_COL", "chargedate")
+
         con = self._connect()
         con.execute("CREATE SCHEMA IF NOT EXISTS prod;")
         con.execute("DROP TABLE IF EXISTS prod.sales;")
         con.register("tmp_df", self._df)
-        con.execute("CREATE TABLE prod.sales AS SELECT * FROM tmp_df;")
+
+        # Ensure the persisted column is DATE (or TIMESTAMP) and drop the old one
+        con.execute(f"""
+            CREATE TABLE prod.sales AS
+            SELECT
+              CAST({date_col} AS DATE) AS {date_col},
+              * EXCLUDE ({date_col})
+            FROM tmp_df;
+        """)
         con.unregister("tmp_df")
         con.execute("ANALYZE prod.sales;")
         logger.info("Persisted uploaded DataFrame into DuckDB prod.sales.")
