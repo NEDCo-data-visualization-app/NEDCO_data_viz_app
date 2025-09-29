@@ -1,3 +1,5 @@
+{% import 'macros/ui.html' as ui %}
+
 <div class="card shadow-sm sticky">
   <div class="card-body">
     <h5 class="card-title mb-3">Filters</h5>
@@ -18,33 +20,28 @@
       <div class="accordion" id="filtersAccordion">
         {% for col, vals in unique_values.items() %}
           {% set selected = args.getlist(col) %}
-          {{ ui.accordion_section(
-              title=col,
-              body=(
-                caller() if false else
-                (
-                  '
-                  {% if col|lower == "meterid" %}
-                    <div class="mb-2">
-                      <input id="meteridSearch" type="text" class="form-control"
-                             placeholder="Search meterid (type to load)">
-                    </div>
-                    <div id="meteridList" class="filter-wrap"></div>
-                  {% elif col|lower == "loc" %}
-                    ' ~ ui.checkbox_list(col, vals, selected, list_id="locList", searchable=true, placeholder="Search location") ~ '
-                  {% else %}
-                    ' ~ ui.checkbox_list(col, vals, selected) ~ '
-                  {% endif %}
-                  '
-                )
-              )
-            )
-          }}
+
+          {% call ui.accordion_section(title=col) %}
+            {% if col|lower == 'meterid' %}
+              <div class="mb-2">
+                <input id="meteridSearch" type="text" class="form-control"
+                       placeholder="Search meterid (type to load)">
+              </div>
+              <div id="meteridList" class="filter-wrap"></div>
+
+            {% elif col|lower == 'loc' %}
+              {{ ui.checkbox_list(col, vals, selected, list_id='locList', searchable=true, placeholder='Search location') }}
+
+            {% else %}
+              {{ ui.checkbox_list(col, vals, selected) }}
+            {% endif %}
+          {% endcall %}
+
         {% endfor %}
       </div>
 
       <div class="d-grid gap-2 mt-3">
-        <button class="btn btn-success" type="submit">Apply Filters</button>
+        <button class="btn btn-success" type="submit" id="apply-filters-btn">Apply Filters</button>
         <a class="btn btn-secondary" href="/">Reset</a>
       </div>
     </form>
