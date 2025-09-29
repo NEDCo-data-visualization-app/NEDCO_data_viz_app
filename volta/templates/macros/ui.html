@@ -1,0 +1,45 @@
+{% macro accordion_section(title, body) -%}
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="heading-{{ loop.index if loop and loop.index is defined else title|replace(' ','_') }}">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+              data-bs-target="#collapse-{{ loop.index if loop and loop.index is defined else title|replace(' ','_') }}"
+              aria-expanded="false">
+        {{ title }}
+      </button>
+    </h2>
+    <div id="collapse-{{ loop.index if loop and loop.index is defined else title|replace(' ','_') }}"
+         class="accordion-collapse collapse">
+      <div class="accordion-body">
+        {{ body | safe }}
+      </div>
+    </div>
+  </div>
+{%- endmacro %}
+
+{% macro checkbox_list(col, values, selected=[], list_id=None, searchable=False, placeholder="Search") -%}
+  {% if searchable %}
+    <div class="mb-2">
+      <input type="text" class="form-control filter-search-input"
+             placeholder="{{ placeholder }}"
+             {% if list_id %}data-filter-target="#{{ list_id }}"{% endif %}>
+    </div>
+  {% endif %}
+  <div class="filter-wrap" {% if list_id %}id="{{ list_id }}"{% endif %}>
+    {% for v in values %}
+      <label class="filter-item">
+        <input type="checkbox" name="{{ col }}" value="{{ v }}"
+               {% if v in selected %}checked{% endif %}>
+        <span class="label-text">{{ v }}</span>
+      </label>
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
+{% macro stat_box(title, value) -%}
+  <div class="col-6 col-md-4 col-xl-2">
+    <div class="p-2 bg-light rounded">
+      <div class="text-muted small">{{ title }}</div>
+      <div class="fs-5 fw-semibold text-nowrap">{{ value }}</div>
+    </div>
+  </div>
+{%- endmacro %}
