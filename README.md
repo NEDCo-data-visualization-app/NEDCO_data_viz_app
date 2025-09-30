@@ -22,3 +22,10 @@ If manually generating, go to GitHub -> Actions -> Package Into One Click (on th
 After completion (both automatic and manual), go to GitHub -> Actions -> Click the workflow run -> Scroll to "Artifacts" at the bottom and you can see two files: volta-macos and volta-windows. This should download a zip file to your computer which, after extraction, will contain the one-click package
 
 Note: If you are sending these files to other people, first compress into a zip file and then send
+
+## Accessing The File (MacOS)
+Once you download the .exec from the steps above, find the location on your computer and open the program. You should get a popup saying:
+
+“Apple could not verify “volta_macos” is free of malware that may harm your Mac or compromise your privacy."
+
+After getting this popup, go to Settings -> Privacy & Security -> scroll down to the Security section and click “Open anyway” for “volta_macos was blocked to protect your map. Click open anyway in the popup and verify with your laptop password.
