@@ -28,4 +28,4 @@ Once you download the .exec from the steps above, find the location on your comp
 
 “Apple could not verify “volta_macos” is free of malware that may harm your Mac or compromise your privacy."
 
-After getting this popup, go to Settings -> Privacy & Security -> scroll down to the Security section and click “Open anyway” for “volta_macos was blocked to protect your map. Click open anyway in the popup and verify with your laptop password.
+After getting this popup, go to Settings -> Privacy & Security -> scroll down to the Security section and click “Open anyway” for “volta_macos was blocked to protect your Mac". Click open anyway in the popup and verify with your laptop password.
