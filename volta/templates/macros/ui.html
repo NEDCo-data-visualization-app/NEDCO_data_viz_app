@@ -38,7 +38,11 @@
              {% if list_id %}data-filter-target="#{{ list_id }}"{% endif %}>
     </div>
   {% endif %}
-  <div class="filter-wrap" {% if list_id %}id="{{ list_id }}"{% endif %}>
+  <div class="filter-wrap"
+       data-filter-list
+       data-filter-name="{{ col }}"
+       data-initial-selected='{{ selected | tojson | safe }}'
+       {% if list_id %}id="{{ list_id }}"{% endif %}>
     {% for v in values %}
       <label class="filter-item">
         <input type="checkbox" name="{{ col }}" value="{{ v }}"

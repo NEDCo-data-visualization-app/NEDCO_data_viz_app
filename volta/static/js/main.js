@@ -1,4 +1,5 @@
 import { initCharts } from './charts/initCharts.js';
+import { initLiveFilters } from './filters/liveFiltersController.js';
 import { initFilterSearch } from './filters/filterSearch.js';
 import { initMeteridDynamic } from './filters/meteridDynamic.js';
 
@@ -11,7 +12,8 @@ window.downloadCurrentTable = downloadCurrentTable;
 window.downloadFilteredCSV = downloadFilteredCSV;
 
 document.addEventListener('DOMContentLoaded', () => {
-  initCharts();
+  initLiveFilters();
   initFilterSearch();
   initMeteridDynamic();
+  initCharts();
 });

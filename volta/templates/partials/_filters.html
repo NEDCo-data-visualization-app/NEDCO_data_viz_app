@@ -4,7 +4,9 @@
   <div class="card-body">
     <h5 class="card-title mb-3">Filters</h5>
 
-    <form method="get" action="/">
+    <form method="get" action="/"
+          data-filters-form
+          data-options-endpoint="{{ url_for('dashboard.filter_options') }}">
       <!-- Date range -->
       <div class="mb-3">
         <label class="form-label">Starting date ({{ date_col }})</label>
@@ -27,7 +29,13 @@
                 <input id="meteridSearch" type="text" class="form-control"
                        placeholder="Search meterid (type to load)">
               </div>
-              <div id="meteridList" class="filter-wrap"></div>
+              <div id="meteridList"
+                   class="filter-wrap"
+                   data-filter-list
+                   data-filter-name="{{ col }}"
+                   data-initial-selected='{{ selected | tojson | safe }}'
+                   data-dynamic-list="true"
+                   data-options-endpoint="{{ url_for('dashboard.options_meterid') }}"></div>
 
             {% elif col|lower == 'loc' %}
               {{ ui.checkbox_list(col, vals, selected, list_id='locList', searchable=true, placeholder='Search location') }}

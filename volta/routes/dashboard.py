@@ -45,14 +45,35 @@ def _parse_date(value: str) -> Optional[date]:
 
 
 def build_params(args, base_df: pd.DataFrame) -> FilterParams:
+    """
+    Build FilterParams from request args with case-insensitive column matching.
+    Ensures selections like 'meterid' match DataFrame columns like 'MeterID'.
+    """
     selections: Dict[str, List[str]] = {}
     exclude_cols = current_app.config["EXCLUDE_COLS"]
+
+    # Map lowercase -> actual column name
+    cols_lc = {str(c).lower(): c for c in base_df.columns}
+
     for column in base_df.columns:
         if column in exclude_cols:
             continue
+        # Try exact match first, then lowercase alias
         values = args.getlist(column)
+        if not values:
+            values = args.getlist(str(column).lower())
         if values:
             selections[column] = [str(v) for v in values]
+
+    # Also catch any args provided only in lowercase that didn't map above
+    for key in args.keys():
+        if key in selections:
+            continue
+        real_col = cols_lc.get(str(key).lower())
+        if real_col and real_col not in exclude_cols:
+            vals = args.getlist(key)
+            if vals:
+                selections[real_col] = [str(v) for v in vals]
 
     freq = (args.get("freq") or "D").upper()
     if freq not in ("D", "W", "M"):
@@ -128,12 +149,12 @@ def index():
     # Build defaults from filtered df for most facets
     unique_values = build_unique_values(after)
 
-    # ---- OVERRIDE heavy facets from FULL TABLE with a sane cap to avoid UI lag ----
+    # ---- Heavy facets ----
     meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
 
+    # Keep meterids capped (optionally from full table) to avoid UI lag on first load
     if "meterid" in base.columns:
         try:
-            # Pull distinct meterids from the full table, but cap the count for initial render
             meterids = datastore.run_query(
                 f"""
                 SELECT DISTINCT meterid AS v
@@ -148,20 +169,31 @@ def index():
             # Fall back to whatever was computed from `after`
             pass
 
+    # IMPORTANT: LOC must reflect current filters (meterid/date/res_mapped...), not full table
     if "loc" in base.columns:
         try:
+            clause, sql_params = FilterParams(
+                start=params.start,
+                end=params.end,
+                selections=params.selections,
+                freq=params.freq,
+                metric=params.metric,
+            ).to_sql_where(date_col=date_col, available_columns=base.columns)
+
             locs = datastore.run_query(
-                """
-                SELECT DISTINCT loc AS v
+                f"""
+                SELECT DISTINCT CAST(loc AS VARCHAR) AS v
                 FROM prod.sales
-                WHERE loc IS NOT NULL
+                WHERE {clause} AND loc IS NOT NULL
                 ORDER BY v;
-                """
+                """,
+                sql_params,
             )["v"].astype(str).tolist()
             unique_values["loc"] = locs
         except Exception:
+            # If anything fails, leave whatever came from `after`
             pass
-    # -------------------------------------------------------------------------------
+    # ---------------------------------------
 
     start_value = end_value = ""
     if date_col in after.columns and len(after) > 0:
@@ -197,6 +229,110 @@ def index():
         chart_metrics=chart_metrics,
         default_metric=default_metric,
     )
+
+
+@bp.route("/filters/options", methods=["POST"])
+def filter_options():
+    datastore = get_datastore()
+    base = datastore.get(copy=False)
+    if base.empty:
+        return jsonify({"options": {}, "dates": {"min": "", "max": ""}, "rows": 0})
+
+    payload = request.get_json(silent=True) or {}
+
+    # --- Case-insensitive column mapping ---
+    cols_lc = {str(c).lower(): c for c in base.columns}
+
+    # Normalize selections (AND logic will be applied in FilterParams/SQL)
+    raw_selections = payload.get("selections") or {}
+    selections: Dict[str, List[str]] = {}
+    for in_key, values in raw_selections.items():
+        if not isinstance(values, (list, tuple)):
+            continue
+        real_col = cols_lc.get(str(in_key).lower())
+        if not real_col:
+            continue
+        cleaned = [str(v) for v in values if v not in (None, "")]
+        if cleaned:
+            selections[real_col] = cleaned
+
+    # Which facets to compute? (Compute only what the UI needs.)
+    facets_in = payload.get("facets") or []
+    if facets_in:
+        facets = [
+            cols_lc.get(str(f).lower())
+            for f in facets_in
+            if cols_lc.get(str(f).lower()) in base.columns
+        ]
+    else:
+        # default: common facets if client didn't specify
+        facets = [c for c in ["loc", "res_mapped", "meterid"] if c in base.columns]
+
+    params = FilterParams(
+        start=_parse_date(str(payload.get("start_date") or "")),
+        end=_parse_date(str(payload.get("end_date") or "")),
+        selections=selections,
+        freq=(payload.get("freq") or "D").upper(),
+        metric=payload.get("metric") or None,
+    )
+
+    date_col = current_app.config["DATE_COL"]
+    clause, sql_params = params.to_sql_where(date_col=date_col, available_columns=base.columns)
+
+    # Helper: DISTINCT values for a column under the current WHERE
+    def distinct(col: str) -> List[str]:
+        df = datastore.run_query(
+            f"""
+            SELECT DISTINCT CAST({col} AS VARCHAR) AS v
+            FROM prod.sales
+            WHERE {clause} AND {col} IS NOT NULL
+            ORDER BY v
+            """,
+            sql_params,
+        )
+        if df is None or df.empty:
+            return []
+        return df["v"].astype(str).tolist()
+
+    # Build options only for the requested facets
+    unique_values: Dict[str, List[str]] = {}
+    for col in facets:
+        unique_values[col] = distinct(col)
+
+    # Keep meterid list capped (UI won’t choke)
+    meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
+    if "meterid" in unique_values:
+        unique_values["meterid"] = unique_values["meterid"][: int(meter_cap)]
+
+    # Min/max dates via SQL
+    ddf = datastore.run_query(
+        f"""
+        SELECT
+          MIN(CAST({date_col} AS DATE)) AS dmin,
+          MAX(CAST({date_col} AS DATE)) AS dmax
+        FROM prod.sales
+        WHERE {clause}
+        """,
+        sql_params,
+    )
+    date_min = ddf.iloc[0]["dmin"].isoformat() if ddf is not None and pd.notna(ddf.iloc[0]["dmin"]) else ""
+    date_max = ddf.iloc[0]["dmax"].isoformat() if ddf is not None and pd.notna(ddf.iloc[0]["dmax"]) else ""
+
+    # Row count via SQL
+    cdf = datastore.run_query(
+        f"SELECT COUNT(*) AS n FROM prod.sales WHERE {clause};",
+        sql_params,
+    )
+    rows = int(cdf.iloc[0]["n"]) if cdf is not None else 0
+
+    return jsonify(
+        {
+            "options": unique_values,
+            "dates": {"min": date_min, "max": date_max},
+            "rows": rows,
+        }
+    )
+
 
 
 @bp.route("/chart-data", methods=["GET"])
@@ -437,20 +573,74 @@ def health():
 
 
 # --- New: on-demand meterid options endpoint (for search-as-you-type) ---
-@bp.route("/options/meterid", methods=["GET"])
+@bp.route("/options/meterid", methods=["GET", "POST"])
 def options_meterid():
     """
     Returns up to 200 distinct meterid values, optionally filtered by:
       - q: substring match (case-insensitive)
-      - loc: exact location match
-    Example:
-      /options/meterid?q=123
-      /options/meterid?loc=Techiman&q=45
+      - other filters (loc, res_mapped, etc.) from selections/dates
     """
-    ds = get_datastore()
+    datastore = get_datastore()
+
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        q = str(payload.get("q") or "").strip()
+        try:
+            limit = int(payload.get("limit") or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        limit = max(limit, 1)
+
+        base = datastore.get(copy=False)
+        if base.empty or "meterid" not in base.columns:
+            return jsonify([])
+
+        raw_selections = payload.get("selections") or {}
+        selections: Dict[str, List[str]] = {}
+
+        # Case-insensitive mapping for non-meterid facets
+        cols_lc = {str(c).lower(): c for c in base.columns}
+        meterid_real = cols_lc.get("meterid", "meterid")
+
+        for in_key, values in raw_selections.items():
+            if not isinstance(values, (list, tuple)):
+                continue
+            real_col = cols_lc.get(str(in_key).lower())
+            if not real_col:
+                continue
+            # Skip filtering the meterid list by itself
+            if str(real_col).lower() == "meterid":
+                continue
+            cleaned = [str(v) for v in values if v not in (None, "")]
+            if cleaned:
+                selections[real_col] = cleaned
+
+        params = FilterParams(
+            start=_parse_date(str(payload.get("start_date") or "")),
+            end=_parse_date(str(payload.get("end_date") or "")),
+            selections=selections,
+        )
+
+        date_col = current_app.config["DATE_COL"]
+        filtered = params.apply(base, date_col)
+        if filtered.empty or meterid_real not in filtered.columns:
+            return jsonify([])
+
+        series = filtered[meterid_real].dropna().astype(str)
+        if q:
+            series = series[series.str.contains(q, case=False, na=False)]
+
+        unique_values = sorted(set(series.tolist()))
+        return jsonify(unique_values[:limit])
+
+    # GET fallback (unchanged)
     q = (request.args.get("q") or "").strip()
     loc = request.args.get("loc")
-    limit = int(request.args.get("limit") or 200)
+    try:
+        limit = int(request.args.get("limit") or 200)
+    except (TypeError, ValueError):
+        limit = 200
+    limit = max(limit, 1)
 
     sql = """
         SELECT DISTINCT meterid AS v
@@ -468,7 +658,7 @@ def options_meterid():
     sql += " ORDER BY v LIMIT ?"
     params.append(limit)
 
-    rows = ds.run_query(sql, params)
+    rows = datastore.run_query(sql, params)
     return jsonify(rows["v"].astype(str).tolist())
 
 
