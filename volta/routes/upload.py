@@ -7,7 +7,7 @@ upload_bp = Blueprint("upload", __name__, template_folder="../../templates")
 
 # Use the configured uploads location (default set in Config.CSV_GLOB = "data/uploads/*.csv")
 def _uploads_dir() -> Path:
-    glob_pat = current_app.config.get("CSV_GLOB", "data/uploads/*.csv")
+    glob_pat = current_app.config.get("CSV_GLOB", "data/*.csv")
     # strip the trailing pattern to get the directory
     p = Path(glob_pat)
     return (p.parent if p.suffix else Path(glob_pat)).resolve()
