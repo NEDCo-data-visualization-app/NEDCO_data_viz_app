@@ -37,11 +37,12 @@ export function drawBar(seriesList, canvasEl) {
       ticks: { maxRotation: 45, minRotation: 0 }
     },
     y: {
-      type: 'linear',
-      position: 'left',
-      beginAtZero: true,
-      ticks: { maxRotation: 0 }
-    }
+        type: 'linear',
+        position: 'left',
+        beginAtZero: true,
+        title: { display: true, text: datasets[0]?.label || ''},
+        ticks: { maxRotation: 0 }
+      }
   };
 
   ctx._chart = new Chart(ctx, {

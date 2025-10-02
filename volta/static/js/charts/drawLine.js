@@ -60,7 +60,11 @@ export function drawLine(seriesDict, canvasEl) {
       title: { display: true, text: 'Charge Date' },
       ticks: { autoSkip: true, maxTicksLimit: 12 }
     },
-    y: { type: 'linear', position: 'left' }
+    y: {
+        type: 'linear',
+        position: 'left',
+        title: { display: true, text: datasets[0]?.label || '' }
+      }
   };
 
   // Only add right axis if legacy two-metric mode is used
