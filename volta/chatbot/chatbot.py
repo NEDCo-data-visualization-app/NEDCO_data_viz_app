@@ -13,7 +13,7 @@ load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 
 df = pd.read_csv("/Users/srinandham/Downloads/NEDCO_data_viz_app/uploads/wkfile_shiny.csv") 
-print(df["chargedate"].min(), df["chargedate"].max()) #Use this as example operation for verifying LLM output
+print(df["chargedate"].min(), df["chargedate"].max()) 
 
 '''
 Working models from OpenRouter: 

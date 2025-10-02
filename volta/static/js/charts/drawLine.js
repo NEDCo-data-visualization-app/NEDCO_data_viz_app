@@ -72,6 +72,7 @@ export function drawLine(seriesDict, canvasEl) {
     scales.y1 = {
       type: 'linear',
       position: 'right',
+      title: { display: true, text: datasets[1]?.label || '' },
       grid: { drawOnChartArea: false }
     };
   }
