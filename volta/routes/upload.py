@@ -6,7 +6,7 @@ import logging
 
 upload_bp = Blueprint("upload", __name__, template_folder="../../templates")
 
-UPLOAD_FOLDER = "uploads"
+UPLOAD_FOLDER = os.path.join(os.path.expanduser('~'), 'Downloads', 'volta_dashboard_data')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {"csv", "xlsx"}
 
