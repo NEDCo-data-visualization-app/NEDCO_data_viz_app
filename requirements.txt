@@ -4,3 +4,8 @@ pyarrow
 python-dotenv
 requests
 dotenv
+duckdb
+langchain
+openai
+matplotlib
+langchain-community

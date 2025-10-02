@@ -1,0 +1,57 @@
+{% import 'macros/ui.html' as ui %}
+
+<div class="card shadow-sm sticky">
+  <div class="card-body">
+    <h5 class="card-title mb-3">Filters</h5>
+
+    <form method="get" action="/"
+          data-filters-form
+          data-options-endpoint="{{ url_for('dashboard.filter_options') }}">
+      <!-- Date range -->
+      <div class="mb-3">
+        <label class="form-label">Starting date ({{ date_col }})</label>
+        <input type="date" class="form-control" name="start_date" value="{{ start_value }}">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Ending date ({{ date_col }})</label>
+        <input type="date" class="form-control" name="end_date" value="{{ end_value }}">
+      </div>
+
+      <hr class="my-3"/>
+
+      <div class="accordion" id="filtersAccordion">
+        {% for col, vals in unique_values.items() %}
+          {% set selected = args.getlist(col) %}
+
+          {% call ui.accordion_section(title=col) %}
+            {% if col|lower == 'meterid' %}
+              <div class="mb-2">
+                <input id="meteridSearch" type="text" class="form-control"
+                       placeholder="Search meterid (type to load)">
+              </div>
+              <div id="meteridList"
+                   class="filter-wrap"
+                   data-filter-list
+                   data-filter-name="{{ col }}"
+                   data-initial-selected='{{ selected | tojson | safe }}'
+                   data-dynamic-list="true"
+                   data-options-endpoint="{{ url_for('dashboard.options_meterid') }}"></div>
+
+            {% elif col|lower == 'loc' %}
+              {{ ui.checkbox_list(col, vals, selected, list_id='locList', searchable=true, placeholder='Search location') }}
+
+            {% else %}
+              {{ ui.checkbox_list(col, vals, selected) }}
+            {% endif %}
+          {% endcall %}
+
+        {% endfor %}
+      </div>
+
+      <div class="d-grid gap-2 mt-3">
+        <button class="btn btn-success" type="submit" id="apply-filters-btn">Apply Filters</button>
+        <a class="btn btn-secondary" href="/">Reset</a>
+      </div>
+    </form>
+  </div>
+</div>

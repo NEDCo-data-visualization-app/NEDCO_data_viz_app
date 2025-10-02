@@ -1,0 +1,6 @@
+# Forecasting & notebooks dependencies
+duckdb
+pandas
+notebook ipykernel
+matplotlib
+prophet

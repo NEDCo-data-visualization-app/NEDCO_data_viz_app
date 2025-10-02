@@ -4,20 +4,40 @@ import os
 import sys
 from typing import Dict
 from dotenv import load_dotenv
+from pathlib import Path
 
 if getattr(sys, "frozen", False):
     load_dotenv(os.path.join(sys._MEIPASS, ".env"))
 else:
     load_dotenv()
 
+
 class Config:
     """Base configuration for the Volta dashboard."""
 
-    # You can override these with environment variables
-    DATA_PATH = os.getenv("VOLTA_DATA_PATH", "data/wkfile_shiny.parquet")
+    # -------------------------
+    # Data paths
+    # -------------------------
+    # DuckDB database file (main store)
+    DUCKDB_PATH = Path(os.getenv("VOLTA_DUCKDB_PATH", "data/warehouse.duckdb"))
+
+    # Location of incoming CSVs (from client uploads)
+    CSV_GLOB = os.getenv("VOLTA_CSV_GLOB", "data/*.csv")
+
+    # -------------------------
+    # Data schema
+    # -------------------------
     DATE_COL = os.getenv("VOLTA_DATE_COL", "chargedate")
+
+    # -------------------------
+    # External services (optional legacy path)
+    # -------------------------
     BUCKET_URL = os.getenv("BUCKET_URL")
-    SUPABASE_KEY= os.getenv("SUPABASE_KEY")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+    # -------------------------
+    # UI filters
+    # -------------------------
     # Hide these from the checkbox UI
     EXCLUDE_COLS = {
         "chargedate",
@@ -33,7 +53,9 @@ class Config:
 
     RES_MAP = {"N-Resid [0]": "Commercial", "Resid [1]": "Residential"}
 
+    # -------------------------
     # Centralized metrics & frequency config
+    # -------------------------
     METRICS: Dict[str, str] = {
         "kwh": "kWh",
         "paymoney": "Pay",

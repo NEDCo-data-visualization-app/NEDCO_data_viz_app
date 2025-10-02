@@ -1,0 +1,27 @@
+{% if summary %}
+  <div class="text-muted small mb-3">
+    {% if summary.date_min and summary.date_max %}Range: {{ summary.date_min }} → {{ summary.date_max }} · {% endif %}
+    {% if summary.meters is not none %}Meters: {{ "{:,}".format(summary.meters) }} · {% endif %}
+    {% if summary.locations is not none %}Locations: {{ "{:,}".format(summary.locations) }} · {% endif %}
+    Rows: {{ "{:,}".format(summary.rows) }} • Cols: {{ summary.cols }}
+  </div>
+{% endif %}
+
+{% if stats %}
+  {% for key, s in stats.items() %}
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <h6 class="mb-0">{{ s.label }}</h6>
+        </div>
+        <div class="row g-2">
+          {{ ui.stat_box("Sum",    "{:,.2f}".format(s.sum)) }}
+          {{ ui.stat_box("Mean",   "{:,.2f}".format(s.mean)) }}
+          {{ ui.stat_box("Median", "{:,.2f}".format(s.median)) }}
+          {{ ui.stat_box("Min",    "{:,.2f}".format(s.min)) }}
+          {{ ui.stat_box("Max",    "{:,.2f}".format(s.max)) }}
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+{% endif %}

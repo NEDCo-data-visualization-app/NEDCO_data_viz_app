@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger("volta")
 
 from .config import Config
-from .routes.dashboard import bp as dashboard_bp
+from .routes.dashboard import bp
 from .services.datastore import DataStore
 from .services.metrics import Metrics
 import os
@@ -48,7 +48,7 @@ def create_app(
     app.extensions["metrics"] = metrics
     app.extensions["datastore"] = datastore
 
-    app.register_blueprint(dashboard_bp)
+    app.register_blueprint(bp)
     app.register_blueprint(upload_bp)
     return app
 
