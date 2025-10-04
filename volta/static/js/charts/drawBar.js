@@ -40,7 +40,6 @@ export function drawBar(seriesList, canvasEl) {
         type: 'linear',
         position: 'left',
         beginAtZero: true,
-        title: { display: true, text: datasets[0]?.label || ''},
         ticks: { maxRotation: 0 }
       }
   };

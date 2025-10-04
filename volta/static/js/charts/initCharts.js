@@ -39,24 +39,12 @@ export function initCharts() {
   // enforce max 2 metrics + sync text
   checkboxes.forEach(cb => {
     cb.addEventListener('change', () => {
-      const checked = Array.from(checkboxes).filter(c => c.checked);
-      if (checked.length > 2) {
-        cb.checked = false;
-        alert('You can select at most 2 metrics.');
-      }
       updateMetricDropdownText();
     });
   });
 
   const refresh = debounce(async () => {
     const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);
-    if (checkedBoxes.length > 2) {
-      checkedBoxes.slice(2).forEach(cb => cb.checked = false);
-      alert('You can select at most 2 metrics.');
-      updateMetricDropdownText();
-      return;
-    }
-
     const metrics = checkedBoxes.map(cb => cb.value);
     const freq    = freqSelect.value;
     const splitBy = document.querySelector('[data-splitby]:checked')?.value || null;
@@ -76,8 +64,22 @@ export function initCharts() {
     if (pieRow) {
       pieRow.innerHTML = '';
       for (let i = 0; i < metrics.length; i++) {
-        const chartId  = i === 0 ? 'pieChart' : 'pieChart2';
-        const colClass = metrics.length === 1 ? 'col-12' : 'col-12 col-md-6';
+        let chartId;
+        let colClass;
+        if (i === 0) {
+          chartId = "pieChart";
+        } else if (i === 1) {
+          chartId = "pieChart2";
+        } else {
+          chartId = "pieChart3";
+        }
+        if (metrics.length === 1){
+            colClass = "col-12";
+        } else if (metrics.length === 2){
+            colClass = "col-12 col-md-6";
+        } else {
+            colClass = "col-12 col-md-4";
+        }
         const chartData = await fetchJson(urlWithFilters('/pie-data', { metric: metrics[i] }));
         if (!chartData) continue;
 

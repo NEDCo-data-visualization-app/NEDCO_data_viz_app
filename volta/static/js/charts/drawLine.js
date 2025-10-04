@@ -38,7 +38,14 @@ export function drawLine(seriesDict, canvasEl) {
   if (!datasets.length && seriesDict?.values) {
     const metrics = Object.keys(seriesDict.values || {});
     datasets = metrics.map((metric, i) => {
-      const color = i === 0 ? '#36A2EB' : '#FF6384';
+      let color;
+      if (i===0){
+        color = '#36A2EB'
+      } else if (i === 1){
+        color ='#FF6384';
+      } else {
+       color = '#4BC0C0'
+      }
       const yAxis = i === 0 ? 'y' : 'y1';
       return {
         label: seriesDict.metric_labels?.[metric] || metric,
