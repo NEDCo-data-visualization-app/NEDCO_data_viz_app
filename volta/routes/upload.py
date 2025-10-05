@@ -2,15 +2,17 @@ from flask import Blueprint, request, render_template, redirect, url_for, curren
 from pathlib import Path
 from werkzeug.utils import secure_filename
 import logging
+import shutil
 
 upload_bp = Blueprint("upload", __name__, template_folder="../../templates")
 
 # Use the configured uploads location (default set in Config.CSV_GLOB = "data/uploads/*.csv")
 def _uploads_dir() -> Path:
     glob_pat = current_app.config.get("CSV_GLOB", "data/*.csv")
-    # strip the trailing pattern to get the directory
     p = Path(glob_pat)
-    return (p.parent if p.suffix else Path(glob_pat)).resolve()
+    uploads_dir = (p.parent if p.suffix else Path(glob_pat)).resolve()
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    return uploads_dir
 
 ALLOWED_EXTENSIONS = {"csv"}
 logger = logging.getLogger("volta.upload")
@@ -51,6 +53,9 @@ def upload_file():
 
             # Done: we no longer write Parquet or modify DATA_PATH
             logger.info("Rebuilt DuckDB from CSV uploads successfully")
+
+            shutil.rmtree(uploads_dir, ignore_errors=True)
+            logger.info("Cleaned up uploads directory %s", uploads_dir)
             return redirect(url_for("dashboard.index"))
 
         except Exception as e:

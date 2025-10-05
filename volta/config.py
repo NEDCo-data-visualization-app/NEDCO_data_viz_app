@@ -19,10 +19,11 @@ class Config:
     # Data paths
     # -------------------------
     # DuckDB database file (main store)
-    DUCKDB_PATH = Path(os.getenv("VOLTA_DUCKDB_PATH", "data/warehouse.duckdb"))
+    DUCKDB_PATH = Path(os.getenv("VOLTA_DUCKDB_PATH", Path.home() / "Downloads" / "volta" / "warehouse.duckdb"))
 
     # Location of incoming CSVs (from client uploads)
-    CSV_GLOB = os.getenv("VOLTA_CSV_GLOB", "data/*.csv")
+    UPLOADS_DIR = Path.home() / "Downloads" / "volta" / "uploads"
+    CSV_GLOB = str(UPLOADS_DIR / "*.csv")
 
     # -------------------------
     # Data schema
