@@ -76,10 +76,11 @@ export function drawLine(seriesDict, canvasEl) {
 
   // Only add right axis if legacy two-metric mode is used
   if (!Array.isArray(seriesDict?.series) && datasets.length > 1) {
+    const secondLabel = datasets[1]?.label || '';
     scales.y1 = {
       type: 'linear',
       position: 'right',
-      title: { display: true, text: datasets[1]?.label || '' },
+      title: { display: true, text: secondLabel === 'kWh' ? secondLabel : 'GHC' },
       grid: { drawOnChartArea: false }
     };
   }
