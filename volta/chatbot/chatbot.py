@@ -12,8 +12,11 @@ load_dotenv()
 
 api_key = os.getenv("OPENAI_API_KEY")
 
-df = pd.read_csv("/Users/srinandham/Downloads/NEDCO_data_viz_app/uploads/wkfile_shiny.csv") 
-print(df["chargedate"].min(), df["chargedate"].max()) 
+df = pd.read_csv("/Users/srinandham/Downloads/NEDCO_data_viz_app/wkfile_shiny.csv") 
+print(df["chargedate"].min(), df["chargedate"].max())
+techiman_df = df[df['loc'] == 'Techiman [13]']  
+percentile_64 = techiman_df['kwh'].quantile(0.64)
+print("64th percentile of kwh for Techiman:", percentile_64) 
 
 '''
 Working models from OpenRouter: 
@@ -32,6 +35,7 @@ llm = ChatOpenAI(
 prompt_template = """
 You are given a pandas dataframe named `df` with columns: {columns}.
 Write Python code using ONLY this dataframe to answer the question: {question}
+When filtering by a string column, use .contains() instead of ==.
 Return the code as plain text wrapped with print(). Do NOT provide explanations.
 """
 
