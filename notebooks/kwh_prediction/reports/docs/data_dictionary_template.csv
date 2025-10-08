@@ -1,0 +1,8 @@
+column,description,type,allowed_values/examples
+meterid,Unique meter identifier,categorical,
+chargedate,Date of energy charge,date,YYYY-MM-DD
+loc,"Location (e.g., Techiman)",categorical,
+res,"Residence type (e.g., N-Resid [0])",categorical,
+kwh,Energy usage (target),numeric,>=0
+ghc,Energy cost,numeric,
+paymoney,Payment made,numeric,
