@@ -119,5 +119,5 @@ export function initCharts() {
   document.querySelectorAll('[data-splitby]').forEach(cb => cb.addEventListener('change', refresh));
 
   updateMetricDropdownText();
-  refresh();
+  setTimeout(refresh, 100);
 }
