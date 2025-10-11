@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from werkzeug.utils import secure_filename
 import logging
+import pandas as pd
 
 upload_bp = Blueprint("upload", __name__, template_folder="../../templates")
 
@@ -32,26 +33,24 @@ def upload_file():
             return redirect(request.url)
 
         if not allowed_file(file.filename):
-            logger.warning("Unsupported file format (only .csv allowed now)")
+            logger.warning("Unsupported file format")
             return redirect(request.url)
 
         try:
-            # Ensure uploads dir exists
             uploads_dir = _uploads_dir()
             uploads_dir.mkdir(parents=True, exist_ok=True)
-
-            # Save CSV to configured uploads dir
             filename = secure_filename(file.filename)
             filepath = uploads_dir / filename
             file.save(str(filepath))
             logger.info("Saved upload to %s", filepath)
 
-            # Materialize CSVs -> DuckDB (rebuild the prod.sales table)
+            df = pd.read_csv(filepath)
             datastore = current_app.extensions["datastore"]
-            datastore.rebuild_from_csv()
+            datastore.set_df(df) 
+            logger.info("Uploaded CSV loaded into DataStore successfully")
 
-            # Done: we no longer write Parquet or modify DATA_PATH
-            logger.info("Rebuilt DuckDB from CSV uploads successfully")
+            os.remove(filepath)
+            logger.info("Temporary uploaded CSV removed from server")
             return redirect(url_for("dashboard.index"))
 
         except Exception as e:

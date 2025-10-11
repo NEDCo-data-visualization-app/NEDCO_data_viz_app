@@ -5,7 +5,6 @@ import logging
 import os
 from io import BytesIO
 from typing import Any, Dict, Mapping, Optional, Union
-
 import duckdb
 import pandas as pd
 import requests
@@ -62,7 +61,8 @@ class DataStore:
         files = _glob.glob(csv_glob)
         if not files:
             logger.warning("No CSV files found for glob %s; creating empty prod.sales", csv_glob)
-            con.execute("CREATE TABLE prod.sales AS SELECT * FROM (SELECT 1 AS dummy) WHERE 1=0;")
+            return
+            #con.execute("CREATE TABLE prod.sales AS SELECT * FROM (SELECT 1 AS dummy) WHERE 1=0;")
         else:
             logger.info("Building prod.sales from %d CSV file(s): %s", len(files), csv_glob)
             # Read CSVs, then normalize chargedate to DATE
@@ -167,14 +167,21 @@ class DataStore:
             logger.info("DuckDB table prod.sales missing; attempting to build from CSV.")
             self.rebuild_from_csv()
 
-    def load(self) -> pd.DataFrame:
+    def load(self):
         if self._df is not None:
             return self._df
 
+        con = self._connect()
+        if self._table_exists():
+            try:
+                raw = con.execute("SELECT * FROM prod.sales;").df()
+                logger.info("Loaded data from local DuckDB prod.sales.")
+                self._df = self._preprocess(raw)
+                return self._df
+            except Exception as e:
+                logger.warning("DuckDB table load failed: %s", e)
         url = self.config.get("BUCKET_URL")
         headers = {"apikey": self.config.get("SUPABASE_KEY")}
-        raw = None
-
         if url:
             try:
                 resp = requests.get(url, headers=headers, timeout=60)
@@ -182,23 +189,14 @@ class DataStore:
                 raw = pd.read_parquet(BytesIO(resp.content))
                 logger.info("Loaded remote parquet from BUCKET_URL.")
                 self.set_df(raw)
-                logger.info("Set df as fetched parquet file")
-            except (requests.HTTPError, requests.ConnectionError, requests.Timeout):
-                logger.warning("Could not fetch remote file. Falling back to DuckDB local table.")
+                logger.info("Set and persisted remote data into DuckDB.")
+                return self._df
+            except (requests.HTTPError, requests.ConnectionError, requests.Timeout) as e:
+                logger.error("Failed to fetch remote file from BUCKET_URL: %s", e)
 
-        if raw is None:
-            self._ensure_data()
-            con = self._connect()
-            try:
-                raw = con.execute("SELECT * FROM prod.sales;").df()
-            except Exception as e:
-                logger.error("Failed to read prod.sales from DuckDB: %s", e)
-                raw = pd.DataFrame()
-
-        logger.info("Loaded raw DataFrame from backend store")
-        self._df = self._preprocess(raw)
-        logger.info("Processed DataFrame")
-        return self._df
+        logger.error("No data source succeeded; skipping DuckDB and CSV fallback.")
+        self._df = None
+        return pd.DataFrame()
 
     def set_df(self, df: pd.DataFrame) -> None:
         self._df = self._preprocess(df)
