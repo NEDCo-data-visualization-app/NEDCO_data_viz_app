@@ -197,6 +197,24 @@ class DataStore:
         logger.error("No data source succeeded; skipping DuckDB and CSV fallback.")
         self._df = None
         return pd.DataFrame()
+    
+    def try_internet_connection(self) -> bool:
+        url = self.config.get("BUCKET_URL")
+        headers = {"apikey": self.config.get("SUPABASE_KEY")}
+        if not url:
+            logger.warning("No BUCKET_URL configured.")
+            return False
+
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            raw = pd.read_parquet(BytesIO(resp.content))
+            logger.info("Internet connection successful. Remote data fetched.")
+            self.set_df(raw)
+            return True
+        except (requests.HTTPError, requests.ConnectionError, requests.Timeout) as e:
+            logger.warning("Internet connection failed: %s", e)
+            return False
 
     def set_df(self, df: pd.DataFrame) -> None:
         self._df = self._preprocess(df)

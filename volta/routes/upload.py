@@ -1,4 +1,4 @@
-from flask import Blueprint, request, render_template, redirect, url_for, current_app
+from flask import Blueprint, request, render_template, redirect, url_for, current_app, Response
 import os
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -58,3 +58,10 @@ def upload_file():
             return redirect(request.url)
 
     return render_template("upload.html")
+
+@upload_bp.route("/try_connection", methods=["POST"])
+def try_connection():
+    datastore = current_app.extensions["datastore"]
+
+    success = datastore.try_internet_connection()
+    return redirect(url_for("dashboard.index"))
