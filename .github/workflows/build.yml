@@ -43,6 +43,7 @@ jobs:
             --add-data "volta/templates:volta/templates" \
             --add-data "volta/static:volta/static" \
             --add-data ".env:." \
+            --copy-metadata duckdb \
             run.py
 
       - name: Upload Mac executable
@@ -86,6 +87,7 @@ jobs:
             --add-data "volta/templates;volta/templates" `
             --add-data "volta/static;volta/static" `
             --add-data ".env;." `
+            --copy-metadata duckdb `
             run.py
 
       - name: Upload Windows executable
