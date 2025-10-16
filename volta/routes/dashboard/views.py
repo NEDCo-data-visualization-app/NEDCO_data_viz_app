@@ -17,7 +17,7 @@ def index():
     metrics = get_metrics()
     base = datastore.get(copy=True)
 
-    if base.empty:
+    if getattr(datastore, "_df", None) is None or base.empty:
         return render_template("upload.html")
 
     if request.args and no_filters_selected(request.args, base):

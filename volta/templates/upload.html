@@ -18,6 +18,14 @@
           {% endif %}
         {% endwith %}
 
+        <div class="d-grid gap-2 mb-3">
+          <form method="POST" action="{{ url_for('upload.try_connection') }}">
+            <button class="btn btn-primary w-100" type="submit">
+              Try Internet Connection
+            </button>
+          </form>
+        </div>
+
         <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_file') }}">
           <div class="mb-3">
             <label for="file" class="form-label">Please upload the csv below</label>

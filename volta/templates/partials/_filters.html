@@ -1,8 +1,8 @@
 {% import 'macros/ui.html' as ui %}
 
-<div class="card shadow-sm sticky">
-  <div class="card-body">
-    <h5 class="card-title mb-3">Filters</h5>
+<div class="sticky d-grid gap-5">
+  <div class="card card-body shadow-sm">
+    <h5 class="card-title">Filters</h5>
 
     <form method="get" action="/"
           data-filters-form
@@ -47,11 +47,31 @@
 
         {% endfor %}
       </div>
-
+      
       <div class="d-grid gap-2 mt-3">
         <button class="btn btn-success" type="submit" id="apply-filters-btn">Apply Filters</button>
         <a class="btn btn-secondary" href="/">Reset</a>
       </div>
     </form>
   </div>
+  <div class="card card-body shadow-sm">
+    <h5 class="card-title mb-3">Internet Status: Stub</h5>
+    <div class="d-grid gap-2 mb-3">
+          <form method="POST" action="{{ url_for('upload.try_connection') }}">
+            <button class="btn btn-primary w-100" type="submit">
+              Try Internet Connection
+            </button>
+          </form>
+  </div>
+  <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_file') }}">
+          <div class="mb-3">
+            <label for="file" class="form-label">Please upload the csv below</label>
+            <input class="form-control" type="file" id="file" name="file" accept=".csv">
+          </div>
+          <div class="d-grid gap-2">
+            <button class="btn btn-success" type="submit">Upload</button>
+          </div>
+        </form>
+</div> 
 </div>
+
