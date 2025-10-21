@@ -7,6 +7,7 @@
     <form method="get" action="/"
           data-filters-form
           data-options-endpoint="{{ url_for('dashboard.filter_options') }}">
+
       <!-- Date range -->
       <div class="mb-3">
         <label class="form-label">Starting date ({{ date_col }})</label>
@@ -19,11 +20,18 @@
 
       <hr class="my-3"/>
 
+      {% set display_names = {
+        'meterid': 'Meter Number',
+        'loc': 'Location',
+        'res_mapped': "Account Type"
+      } %}
+
       <div class="accordion" id="filtersAccordion">
         {% for col, vals in unique_values.items() %}
           {% set selected = args.getlist(col) %}
+          {% set title = display_names.get(col|lower, col) %}
 
-          {% call ui.accordion_section(title=col) %}
+          {% call ui.accordion_section(title=title) %}
             {% if col|lower == 'meterid' %}
               <div class="mb-2">
                 <input id="meteridSearch" type="text" class="form-control"
@@ -35,7 +43,8 @@
                    data-filter-name="{{ col }}"
                    data-initial-selected='{{ selected | tojson | safe }}'
                    data-dynamic-list="true"
-                   data-options-endpoint="{{ url_for('dashboard.options_meterid') }}"></div>
+                   data-options-endpoint="{{ url_for('dashboard.options_meterid') }}">
+              </div>
 
             {% elif col|lower == 'loc' %}
               {{ ui.checkbox_list(col, vals, selected, list_id='locList', searchable=true, placeholder='Search location') }}
@@ -44,7 +53,6 @@
               {{ ui.checkbox_list(col, vals, selected) }}
             {% endif %}
           {% endcall %}
-
         {% endfor %}
       </div>
       
@@ -54,24 +62,25 @@
       </div>
     </form>
   </div>
+
   <div class="card card-body shadow-sm">
     <h5 class="card-title mb-3">Internet Status: Stub</h5>
     <div class="d-grid gap-2 mb-3">
-          <form method="POST" action="{{ url_for('upload.try_connection') }}">
-            <button class="btn btn-primary w-100" type="submit">
-              Try Internet Connection
-            </button>
-          </form>
-  </div>
-  <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_file') }}">
-          <div class="mb-3">
-            <label for="file" class="form-label">Please upload the csv below</label>
-            <input class="form-control" type="file" id="file" name="file" accept=".csv">
-          </div>
-          <div class="d-grid gap-2">
-            <button class="btn btn-success" type="submit">Upload</button>
-          </div>
-        </form>
-</div> 
-</div>
+      <form method="POST" action="{{ url_for('upload.try_connection') }}">
+        <button class="btn btn-primary w-100" type="submit">
+          Try Internet Connection
+        </button>
+      </form>
+    </div>
 
+    <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_file') }}">
+      <div class="mb-3">
+        <label for="file" class="form-label">Please upload the csv below</label>
+        <input class="form-control" type="file" id="file" name="file" accept=".csv">
+      </div>
+      <div class="d-grid gap-2">
+        <button class="btn btn-success" type="submit">Upload</button>
+      </div>
+    </form>
+  </div> 
+</div>
