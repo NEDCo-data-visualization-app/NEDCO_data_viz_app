@@ -4,3 +4,4 @@ pandas
 notebook ipykernel
 matplotlib
 prophet
+tensorflow
