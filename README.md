@@ -101,5 +101,21 @@ The command loads environment variables, boots the Flask app, and opens your bro
 - Static assets are bundled under `volta/static`; run `npm` tooling there if you need to recompile JS/CSS (not required for basic development).
 - For data debugging, open the DuckDB file with the CLI or Python REPL to validate tables and schemas before exposing them in the dashboard.
 
+## Generating A One Click File for Windows/Mac
+
+To generate a .exec for MacOS and Windows, you can just push to the main branch and it will be generated.
+
+If manually generating, go to GitHub -> Actions -> Package Into One Click (on the left under "All workflows") -> Run workflow
+
+After completion (both automatic and manual), go to GitHub -> Actions -> Click the workflow run -> Scroll to "Artifacts" at the bottom and you can see two files: volta-macos and volta-windows. This should download a zip file to your computer which, after extraction, will contain the one-click package
+
+Note: If you are sending these files to other people, first compress into a zip file and then send
+
+## Accessing The File (MacOS)
+Once you download the .exec from the steps above, find the location on your computer and open the program. You should get a popup saying:
+
+“Apple could not verify “volta_macos” is free of malware that may harm your Mac or compromise your privacy."
+
+After getting this popup, go to Settings -> Privacy & Security -> scroll down to the Security section and click “Open anyway” for “volta_macos was blocked to protect your map. Click open anyway in the popup and verify with your laptop password.
 ---
 Questions or contributions are welcome—open an issue or submit a pull request when you extend the dashboard.
