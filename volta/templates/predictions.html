@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-xl-8">
+    <div class="d-flex flex-column flex-sm-row align-items-sm-center justify-content-between mb-4">
+      <div class="mb-3 mb-sm-0">
+        <h1 class="h3 mb-1">Predictions</h1>
+        <p class="text-muted mb-0">Prediction insights will be available here soon.</p>
+      </div>
+      <button
+        class="btn btn-outline-secondary d-inline-flex align-items-center"
+        type="button"
+        data-bs-toggle="collapse"
+        data-bs-target="#predictionFilters"
+        aria-expanded="true"
+        aria-controls="predictionFilters"
+      >
+        <span class="me-2 d-none d-sm-inline">Filters</span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="20"
+          height="20"
+          fill="currentColor"
+          class="bi bi-funnel"
+          viewBox="0 0 16 16"
+          role="img"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path d="M1.5 1.5a.5.5 0 0 1 .5-.5h12a.5.5 0 0 1 .39.812l-4.341 5.057A1 1 0 0 0 10 7.748v4.004l-3 1.5V7.748a1 1 0 0 0-.049-.29L2.61 1.812A.5.5 0 0 1 3 1.5z" />
+        </svg>
+        <span class="visually-hidden">Toggle prediction filters</span>
+      </button>
+    </div>
+
+    <div class="collapse show" id="predictionFilters">
+      <div class="card shadow-sm mb-4">
+        <div class="card-body">
+          <form class="d-grid gap-4" novalidate data-prediction-filters>
+            <div class="accordion" id="meterNumberFilter">
+              <div class="accordion-item">
+                <h2 class="accordion-header" id="meterNumberHeading">
+                  <button
+                    class="accordion-button bg-primary-subtle text-primary fw-semibold"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#meterNumberCollapse"
+                    aria-expanded="true"
+                    aria-controls="meterNumberCollapse"
+                  >
+                    Meter Number
+                  </button>
+                </h2>
+                <div
+                  id="meterNumberCollapse"
+                  class="accordion-collapse collapse show"
+                  aria-labelledby="meterNumberHeading"
+                  data-bs-parent="#meterNumberFilter"
+                >
+                  <div class="accordion-body">
+                    <div class="mb-3">
+                      <label for="predictionMeterSearch" class="form-label visually-hidden"
+                        >Search Meter Number</label
+                      >
+                      <input
+                        type="search"
+                        id="predictionMeterSearch"
+                        class="form-control"
+                        placeholder="Search meterid (type to load)"
+                        autocomplete="off"
+                        aria-label="Search meter number"
+                        data-prediction-meter-search
+                      />
+                    </div>
+                    <input
+                      type="hidden"
+                      name="meterid"
+                      id="predictionSelectedMeter"
+                      data-prediction-meter-input
+                    />
+                    <div
+                      class="alert alert-info d-none align-items-center gap-2 py-2 px-3"
+                      role="status"
+                      data-prediction-meter-summary
+                    >
+                      <span class="fw-semibold">Selected meter:</span>
+                      <span data-prediction-meter-label></span>
+                    </div>
+                    <div
+                      class="border rounded overflow-auto"
+                      style="max-height: 260px;"
+                      data-prediction-meter-list
+                      data-options-endpoint="{{ url_for('dashboard.options_meterid') }}"
+                      data-limit="{{ meterid_limit }}"
+                      data-initial-options='{{ meter_options | tojson | safe }}'
+                    >
+                      {% if meter_options %}
+                        <div class="list-group list-group-flush">
+                          {% for meter in meter_options %}
+                            <button
+                              type="button"
+                              class="list-group-item list-group-item-action prediction-meter-option text-start"
+                              data-meter-value="{{ meter }}"
+                            >
+                              {{ meter }}
+                            </button>
+                          {% endfor %}
+                        </div>
+                      {% else %}
+                        <div class="text-muted small px-2 py-1">No meter IDs available</div>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="d-grid gap-2 gap-sm-3 d-sm-flex justify-content-sm-end">
+              <button type="button" class="btn btn-success">Predict</button>
+              <button type="button" class="btn btn-primary">Predict All</button>
+              <button type="reset" class="btn btn-outline-secondary" data-prediction-reset>
+                Reset Filter
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-center py-5">
+      <p class="text-muted mb-0">Prediction results will be displayed here once available.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

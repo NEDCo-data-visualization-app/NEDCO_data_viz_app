@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% import "macros/ui.html" as ui %}
 {% block content %}
+<div class="d-flex justify-content-end mb-3">
+  <a
+    class="btn btn-primary"
+    href="{{ url_for('dashboard.predictions') }}"
+    target="_blank"
+    rel="noopener"
+  >
+    See Predictions
+  </a>
+</div>
 <div class="row g-4">
   <div class="col-12 col-lg-4">
     {% include "partials/_filters.html" %}

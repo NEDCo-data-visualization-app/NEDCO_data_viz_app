@@ -101,4 +101,42 @@ def index():
     )
 
 
+def predictions():
+    datastore = get_datastore()
+    base = datastore.get(copy=True)
+
+    meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
+    meter_options: list[str] = []
+
+    if getattr(datastore, "_df", None) is not None and not base.empty:
+        cols_lc = {str(col).lower(): col for col in base.columns}
+        meter_column = cols_lc.get("meterid")
+
+        if meter_column:
+            try:
+                rows = datastore.run_query(
+                    f"""
+                    SELECT DISTINCT meterid AS v
+                    FROM prod.sales
+                    WHERE meterid IS NOT NULL
+                    ORDER BY v
+                    LIMIT {int(meter_cap)};
+                    """
+                )
+                meter_options = rows["v"].astype(str).tolist()
+            except Exception:
+                try:
+                    series = base[meter_column].dropna().astype(str)
+                    meter_options = sorted(series.unique().tolist())[: int(meter_cap)]
+                except Exception:
+                    meter_options = []
+
+    return render_template(
+        "predictions.html",
+        meter_options=meter_options,
+        meterid_limit=int(meter_cap),
+    )
+
+
+bp.add_url_rule("/predictions", view_func=predictions, methods=["GET"])
 bp.add_url_rule("/", view_func=index, methods=["GET"])
