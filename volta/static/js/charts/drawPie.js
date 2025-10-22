@@ -30,9 +30,9 @@ export function drawPie(series, canvasEl) {
             const total = context.chart.data.datasets[0].data
               .reduce((a, b) => a + b, 0);
             const percent = total ? (value / total) * 100 : 0;
-            return percent.toFixed(2) + '%';
+            return percent.toFixed(1) + '%';
           },
-          color: '#fff',
+          color: '#000000',
           font: { weight: 'normal' }
         }
       },

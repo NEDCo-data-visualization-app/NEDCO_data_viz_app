@@ -4,7 +4,7 @@
 
     {% if chart_metrics and chart_metrics|length > 0 %}
       {% set current_metric = args.get('metric') or default_metric %}
-      {% set current_freq   = (args.get('freq') or 'D').upper() %}
+      {% set current_freq   = (args.get('freq') or 'M').upper() %}
 
       <div class="row g-2 align-items-end mb-3">
         <div class="col-12 col-md-4">
