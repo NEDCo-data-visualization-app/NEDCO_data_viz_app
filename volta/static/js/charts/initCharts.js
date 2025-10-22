@@ -1,4 +1,4 @@
-import { drawLine } from './drawLine.js';
+import { drawLine, drawLineTotals } from './drawLine.js';
 import { drawPie } from './drawPie.js';
 import { drawBar } from './drawBar.js';
 import { urlWithFilters, updateUrlQuery } from '../utils/url.js';
@@ -30,10 +30,11 @@ function updateMetricDropdownText() {
 export function initCharts() {
   const freqSelect = document.getElementById('freqSelect');
   const lineEl     = document.getElementById('lineChart');
+  const lineTotalEl = document.getElementById('lineChartTotal');
   const barEl      = document.getElementById('barChart');
   const pieRow     = document.getElementById('pieChartsRow');
   const checkboxes = document.querySelectorAll('.metric-checkbox');
-
+  let refreshToken = 0;
   if (!checkboxes.length || !freqSelect || !lineEl) return;
 
   // enforce max 2 metrics + sync text
@@ -42,8 +43,9 @@ export function initCharts() {
       updateMetricDropdownText();
     });
   });
-
+  
   const refresh = debounce(async () => {
+    const token = ++refreshToken; 
     const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);
     const metrics = checkedBoxes.map(cb => cb.value);
     const freq    = freqSelect.value;
@@ -59,6 +61,14 @@ export function initCharts() {
       split_by: splitBy
     }));
     drawLine(series, lineEl);
+
+    const totalSeries = await fetchJson(urlWithFilters('/chart-data', {
+      metric: metrics.join(','),
+      freq,
+      split_by: splitBy,
+      agg: 'sum'
+    }));
+    drawLineTotals(totalSeries, lineTotalEl);
 
     // Pie charts
     if (pieRow) {
@@ -81,6 +91,7 @@ export function initCharts() {
             colClass = "col-12 col-md-4";
         }
         const chartData = await fetchJson(urlWithFilters('/pie-data', { metric: metrics[i] }));
+        if (token !== refreshToken) return;
         if (!chartData) continue;
 
         const metricLabel = chartData.metric_label || metrics[i];

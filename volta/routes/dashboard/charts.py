@@ -34,7 +34,13 @@ def chart_data():
 
     trunc_unit = params.trunc_unit()
 
-    metric_sql = ", ".join([f"AVG({m}) AS {m}" for m in validated_metrics])
+    agg_func = request.args.get("agg", "mean").lower()
+    if agg_func in ("sum", "total"):
+        sql_agg = "SUM"
+    else:
+        sql_agg = "AVG"
+
+    metric_sql = ", ".join([f"{sql_agg}({m}) AS {m}" for m in validated_metrics])
     sql = f"""
         SELECT
           date_trunc('{trunc_unit}', {date_col}) AS bucket,
