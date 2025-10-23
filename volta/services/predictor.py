@@ -674,7 +674,7 @@ class PredictorLGBM:
     def predict_recursive_one(self,
                               meterid: int,
                               as_of: str,
-                              steps: int = 3,
+                              steps: int = 12,
                               rows_per_meter: int = 36) -> pd.DataFrame:
         """
         Multi-step forecast for ONE meter.
