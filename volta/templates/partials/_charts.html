@@ -35,6 +35,33 @@
         </div>
       </div>
 
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <h6 class="mb-1">Time series (Total): {{ date_col }} vs Metric</h6>
+          <div class="text-muted small mb-2">
+            Values shown are <strong>totals</strong> per selected time bucket.
+          </div>
+          <div class="chart-box"><canvas id="lineChartTotal"></canvas></div>
+          <button class="btn btn-outline-secondary btn-sm mt-2"
+                  onclick="downloadChart('lineChartTotal','time_series_total.png')">
+            Download Chart
+          </button>
+        </div>
+      </div>
+
+       <!-- Bar by city -->
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <h6 class="mb-1">Totals by City</h6>
+          <div class="text-muted small mb-2">Shows the <strong>sum</strong> of the selected metric grouped by city.</div>
+          <div class="chart-box"><canvas id="barChart"></canvas></div>
+          <button class="btn btn-outline-secondary btn-sm mt-2"
+                  onclick="downloadChart('barChart','totals_by_city.png')">
+            Download Chart
+          </button>
+        </div>
+      </div>
+
       <!-- Time series -->
       <div class="card border-0 shadow-sm mb-3">
         <div class="card-body">
@@ -51,32 +78,6 @@
       <!-- Composition donut(s) -->
       <div class="row g-3" id="pieChartsRow"></div>
 
-      <!-- Bar by city -->
-      <div class="card border-0 shadow-sm mb-3">
-        <div class="card-body">
-          <h6 class="mb-1">Totals by City</h6>
-          <div class="text-muted small mb-2">Shows the <strong>sum</strong> of the selected metric grouped by city.</div>
-          <div class="chart-box"><canvas id="barChart"></canvas></div>
-          <button class="btn btn-outline-secondary btn-sm mt-2"
-                  onclick="downloadChart('barChart','totals_by_city.png')">
-            Download Chart
-          </button>
-        </div>
-      </div>
-      
-    <div class="card border-0 shadow-sm mb-3">
-      <div class="card-body">
-        <h6 class="mb-1">Time series (Total): {{ date_col }} vs Metric</h6>
-        <div class="text-muted small mb-2">
-          Values shown are <strong>totals</strong> per selected time bucket.
-        </div>
-        <div class="chart-box"><canvas id="lineChartTotal"></canvas></div>
-        <button class="btn btn-outline-secondary btn-sm mt-2"
-                onclick="downloadChart('lineChartTotal','time_series_total.png')">
-          Download Chart
-        </button>
-      </div>
-    </div>
     {% else %}
       <div class="alert alert-warning mb-0">
         No numeric metrics available to chart for the current dataset.
