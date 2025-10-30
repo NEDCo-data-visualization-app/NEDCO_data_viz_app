@@ -13,7 +13,7 @@
 #
 # # ---- defaults (relative to project root) ----
 # DB_PATH       = Path("data/warehouse.duckdb")
-# TABLE         = "prod.sales"
+# TABLE         = "electricity.billing_records"
 # MODEL_PATH    = Path("models/lstm_next.keras")
 # SCALER_PATH   = Path("models/scaler.pkl")          # must contain tuple (sx, sy)
 # FEATURES_PATH = Path("models/feature_cols.json")
@@ -248,7 +248,7 @@ def _advance_as_of(as_of: str) -> pd.Timestamp:
 
 # paths: file is at volta/services/, data/ and models/ are two levels up
 DB_PATH       = Path("../../data/warehouse.duckdb")
-TABLE         = "prod.sales"
+TABLE         = "electricity.billing_records"
 LGBM_PATH     = Path("../../models/lgbm_bundle.pkl")       # {"models": {"kwh":..., "ghc":..., "paymoney":...}} or {"model": ...}
 FEATURES_PATH = Path("../../models/feature_cols.json")     # optional; falls back to FEATURE_COLS_TRAINED
 

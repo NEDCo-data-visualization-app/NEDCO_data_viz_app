@@ -17,7 +17,7 @@ class DataStore:
 
     Storage backend: DuckDB (.duckdb file)
     - Source data: CSV files matched by Config.CSV_GLOB
-    - Materialized table: prod.sales
+    - Materialized table: electricity.billing_records
     """
 
     def __init__(self, config: Mapping[str, Any], metrics: "Metrics"):
@@ -41,34 +41,34 @@ class DataStore:
             return bool(
                 con.execute(
                     "SELECT COUNT(*) FROM information_schema.tables "
-                    "WHERE table_schema='prod' AND table_name='sales';"
+                    "WHERE table_schema='electricity' AND table_name='billing_records';"
                 ).fetchone()[0]
             )
         except Exception:
             return False
 
     def rebuild_from_csv(self) -> None:
-        """Full rebuild of prod.sales from CSVs matched by CSV_GLOB."""
+        """Full rebuild of electricity.billing_records from CSVs matched by CSV_GLOB."""
         con = self._connect()
         csv_glob = self.config.get("CSV_GLOB", "data/*.csv")
         date_col = self.config.get("DATE_COL", "chargedate")
         date_fmt = self.config.get("DATE_FMT", "%d-%b-%y")  # add DATE_FMT to config if needed
 
-        con.execute("CREATE SCHEMA IF NOT EXISTS prod;")
-        con.execute("DROP TABLE IF EXISTS prod.sales;")
+        con.execute("CREATE SCHEMA IF NOT EXISTS electricity;")
+        con.execute("DROP TABLE IF EXISTS electricity.billing_records;")
 
         import glob as _glob
         files = _glob.glob(csv_glob)
         if not files:
-            logger.warning("No CSV files found for glob %s; creating empty prod.sales", csv_glob)
+            logger.warning("No CSV files found for glob %s; creating empty electricity.billing_records", csv_glob)
             return
-            #con.execute("CREATE TABLE prod.sales AS SELECT * FROM (SELECT 1 AS dummy) WHERE 1=0;")
+            #con.execute("CREATE TABLE electricity.billing_records AS SELECT * FROM (SELECT 1 AS dummy) WHERE 1=0;")
         else:
-            logger.info("Building prod.sales from %d CSV file(s): %s", len(files), csv_glob)
+            logger.info("Building electricity.billing_records from %d CSV file(s): %s", len(files), csv_glob)
             # Read CSVs, then normalize chargedate to DATE
             con.execute(
                 f"""
-                CREATE TABLE prod.sales AS
+                CREATE TABLE electricity.billing_records AS
                 WITH raw AS (
                   SELECT * FROM read_csv_auto('{csv_glob}', HEADER=TRUE)
                 )
@@ -79,12 +79,12 @@ class DataStore:
                 """
             )
 
-        con.execute("ANALYZE prod.sales;")
-        logger.info("DuckDB table prod.sales rebuilt and analyzed.")
+        con.execute("ANALYZE electricity.billing_records;")
+        logger.info("DuckDB table electricity.billing_records rebuilt and analyzed.")
 
         # Optional: helpful indexes
-        con.execute("CREATE INDEX IF NOT EXISTS idx_sales_country ON prod.sales(country);")
-        con.execute("CREATE INDEX IF NOT EXISTS idx_sales_category ON prod.sales(category);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_billing_records_country ON electricity.billing_records(country);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_billing_records_category ON electricity.billing_records(category);")
 
         self._df = None
 
@@ -98,7 +98,7 @@ class DataStore:
         SELECT
           date_trunc('day', {self.config.get("DATE_COL", "chargedate")}) AS day,
           SUM(amount) AS total_amount
-        FROM prod.sales
+        FROM electricity.billing_records
         WHERE {self.config.get("DATE_COL", "chargedate")} BETWEEN ? AND ?
           AND (? IS NULL OR country = ?)
           AND (? IS NULL OR category = ?)
@@ -113,7 +113,7 @@ class DataStore:
         SELECT
           category,
           SUM(amount) AS total_amount
-        FROM prod.sales
+        FROM electricity.billing_records
         WHERE {self.config.get("DATE_COL", "chargedate")} BETWEEN ? AND ?
         GROUP BY category
         ORDER BY total_amount DESC
@@ -125,7 +125,7 @@ class DataStore:
         sql = f"""
         SELECT {self.config.get("DATE_COL", "chargedate")} AS chargedate,
                country, category, amount
-        FROM prod.sales
+        FROM electricity.billing_records
         WHERE {self.config.get("DATE_COL", "chargedate")} BETWEEN ? AND ?
           AND (? IS NULL OR country = ?)
         ORDER BY {self.config.get("DATE_COL", "chargedate")} DESC
@@ -164,7 +164,7 @@ class DataStore:
 
     def _ensure_data(self) -> None:
         if not self._table_exists():
-            logger.info("DuckDB table prod.sales missing; attempting to build from CSV.")
+            logger.info("DuckDB table electricity.billing_records missing; attempting to build from CSV.")
             self.rebuild_from_csv()
 
     def load(self):
@@ -174,8 +174,8 @@ class DataStore:
         con = self._connect()
         if self._table_exists():
             try:
-                raw = con.execute("SELECT * FROM prod.sales;").df()
-                logger.info("Loaded data from local DuckDB prod.sales.")
+                raw = con.execute("SELECT * FROM electricity.billing_records;").df()
+                logger.info("Loaded data from local DuckDB electricity.billing_records.")
                 self._df = self._preprocess(raw)
                 return self._df
             except Exception as e:
@@ -223,21 +223,21 @@ class DataStore:
         date_col = self.config.get("DATE_COL", "chargedate")
 
         con = self._connect()
-        con.execute("CREATE SCHEMA IF NOT EXISTS prod;")
-        con.execute("DROP TABLE IF EXISTS prod.sales;")
+        con.execute("CREATE SCHEMA IF NOT EXISTS electricity;")
+        con.execute("DROP TABLE IF EXISTS electricity.billing_records;")
         con.register("tmp_df", self._df)
 
         # Ensure the persisted column is DATE (or TIMESTAMP) and drop the old one
         con.execute(f"""
-            CREATE TABLE prod.sales AS
+            CREATE TABLE electricity.billing_records AS
             SELECT
               CAST({date_col} AS DATE) AS {date_col},
               * EXCLUDE ({date_col})
             FROM tmp_df;
         """)
         con.unregister("tmp_df")
-        con.execute("ANALYZE prod.sales;")
-        logger.info("Persisted uploaded DataFrame into DuckDB prod.sales.")
+        con.execute("ANALYZE electricity.billing_records;")
+        logger.info("Persisted uploaded DataFrame into DuckDB electricity.billing_records.")
 
     def get(self, copy: bool = True) -> pd.DataFrame:
         df = self.load()

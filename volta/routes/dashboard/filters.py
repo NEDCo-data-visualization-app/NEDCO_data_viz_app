@@ -60,7 +60,7 @@ def filter_options():
         df = datastore.run_query(
             f"""
             SELECT DISTINCT CAST({col} AS VARCHAR) AS v
-            FROM prod.sales
+            FROM electricity.billing_records
             WHERE {clause} AND {col} IS NOT NULL
             ORDER BY v
             """,

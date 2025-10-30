@@ -87,7 +87,7 @@ def _collect_historical_monthly(
             SUM(kwh)   AS kwh,
             SUM(ghc)   AS ghc,
             SUM(paymoney) AS paymoney
-        FROM prod.sales
+        FROM electricity.billing_records
         WHERE {where_sql}
         GROUP BY 1
         ORDER BY 1
@@ -175,7 +175,7 @@ def _get_meter_last_date(meterid: str) -> str | None:
         rows = datastore.run_query(
             f"""
             SELECT MAX({date_col}) AS last_date
-            FROM prod.sales
+            FROM electricity.billing_records
             WHERE {date_col} IS NOT NULL
               AND meterid IS NOT NULL
               AND CAST(meterid AS VARCHAR) = ?
@@ -243,7 +243,7 @@ def index():
             meterids = datastore.run_query(
                 f"""
                 SELECT DISTINCT meterid AS v
-                FROM prod.sales
+                FROM electricity.billing_records
                 WHERE meterid IS NOT NULL
                 ORDER BY v
                 LIMIT {int(meter_cap)};
@@ -263,7 +263,7 @@ def index():
             locs = datastore.run_query(
                 f"""
                 SELECT DISTINCT CAST(loc AS VARCHAR) AS v
-                FROM prod.sales
+                FROM electricity.billing_records
                 WHERE {clause} AND loc IS NOT NULL
                 ORDER BY v;
                 """,
@@ -324,7 +324,7 @@ def predictions():
                 rows = datastore.run_query(
                     f"""
                     SELECT DISTINCT meterid AS v
-                    FROM prod.sales
+                    FROM electricity.billing_records
                     WHERE meterid IS NOT NULL
                     ORDER BY v
                     LIMIT {int(meter_cap)};
