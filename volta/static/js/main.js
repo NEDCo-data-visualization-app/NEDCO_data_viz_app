@@ -2,6 +2,9 @@ import { initCharts } from './charts/initCharts.js';
 import { initLiveFilters } from './filters/liveFiltersController.js';
 import { initFilterSearch } from './filters/filterSearch.js';
 import { initMeteridDynamic } from './filters/meteridDynamic.js';
+import { initPredictionFilters } from './predictions/initPredictionFilters.js';
+import { initPredictionActions } from './predictions/predictionActions.js';
+import { initPredictionCharts } from './predictions/predictionCharts.js';
 
 // Table + chart export helpers
 import { downloadTableAsCSV, downloadChart, downloadCurrentTable, downloadFilteredCSV } from './utils/export.js';
@@ -15,5 +18,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initLiveFilters();
   initFilterSearch();
   initMeteridDynamic();
+  initPredictionFilters();
+  initPredictionCharts();
+  initPredictionActions();
   initCharts();
 });

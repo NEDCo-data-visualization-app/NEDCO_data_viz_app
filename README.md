@@ -11,6 +11,7 @@ VoltaV is a Flask-based analytics dashboard for the Northern Electricity Distrib
 - [Running the app](#running-the-app)
 - [Working with data](#working-with-data)
 - [Dashboard walkthrough](#dashboard-walkthrough)
+- [Forecasting & predictions](#forecasting--predictions)
 - [Development tips](#development-tips)
 
 ## Key features
@@ -18,6 +19,7 @@ VoltaV is a Flask-based analytics dashboard for the Northern Electricity Distrib
 - **Upload workflow** – Analysts can upload fresh CSVs from the dashboard; files are validated, ingested into the DuckDB table, and then removed from disk.
 - **Powerful filtering** – Date range pickers and dynamic checkbox filters (including asynchronous meter ID lookups) let users slice data by any categorical column while hiding low-level fields by default.
 - **Interactive visualizations** – Time-series, composition, and city-level charts, plus descriptive statistics and tabular previews with export buttons, provide a complete analytical view.
+- **Forecast explorer** – A dedicated predictions workspace lets analysts run LightGBM forecasts per meter or across the fleet, review charted projections, and export CSV previews for downstream analysis.
 - **Configurable metrics** – Centralized metric labels and frequency rules allow teams to rename or add KPIs without touching presentation logic.
 
 ## Project structure
@@ -98,6 +100,25 @@ The command loads environment variables, boots the Flask app, and opens your bro
 - **Summary stats** – Displays dataset coverage (date range, meters, locations, row/column counts) and per-metric aggregates (sum, mean, median, min, max).
 - **Data table** – Renders a paginated preview of filtered records with an option to export the current result set as CSV.
 - **Connectivity tools** – Buttons at the bottom of the filters card let operators test internet connectivity and ingest fresh data without leaving the app.
+
+## Forecasting & predictions
+- **Accessing the view** – Click the **See Predictions** button on the main dashboard to open the forecasting workspace in a new tab. The page mirrors the dashboard’s funnel icon and accordion styling so it feels familiar.
+- **Meter selection** – Use the search bar to load unique meter IDs on demand. Selecting an entry hides the rest to enforce single selection, and the **Reset Filter** button restores the full list. Without a selection the Predict action remains disabled.
+- **Running forecasts** –
+  - **Predict All** executes the LightGBM bundle for every available meter using the September 2020 cutoff established in the exploratory analysis notebook. The response includes an aggregated preview table (top 10 rows) and an enabled CSV download link for the full dataset.
+  - **Predict** runs the same recursion for the chosen meter. The backend resolves the meter’s most recent observation to use as the `as_of` anchor before returning the preview and meter-specific CSV export.
+- **Charts** – Two responsive line charts summarize the output:
+  - **Energy Usage Forecast (kWh)** plots monthly totals with toggles for “History + Forecast” (solid historical line with a dashed forecast extension) and “Forecast Only.”
+  - **Paymoney & GHC Forecast** renders both monetary targets on a shared axis with identical mode toggles. Historical values are monthly sums; forecast values reuse the recursive outputs.
+- **Downloads & previews** – A status card beneath the charts switches from an informational message to a table once predictions run. The CSV download button dynamically targets either the fleet-wide or single-meter export, mirroring the main dashboard’s data-table UX.
+
+## Forecast model
+The predictions view is powered by the LightGBM-based `PredictorLGBM` service (`volta/services/predictor.py`). Highlights include:
+
+- **Model bundle** – The serialized artifact (`models/lgbm_bundle.pkl`) stores either a multi-output booster or three per-target boosters (`kwh`, `ghc`, `paymoney`). The loader inspects the bundle to determine whether to dispatch a shared model or individual estimators.
+- **Feature engineering** – Forecasts draw on 47 engineered features covering monthly seasonality (sine/cosine encodings), categorical encodings for location and residential flags, lagged metrics, rolling means/standard deviations (3- and 6-month windows), cumulative statistics, and first/second-order deltas for each target. Features are assembled from DuckDB snapshots at run time.
+- **Recursive horizon** – The `predict_recursive` (fleet) and `predict_recursive_one` (single meter) methods iteratively score the LightGBM model(s), append the predicted month to the working snapshot, and rebuild features for the next horizon. This keeps the forecast autoregressive while preserving location/residential metadata for downstream joins.
+- **Aggregation helpers** – Forecast data frames are aggregated to monthly totals for charting, and both previews and CSV downloads are surfaced to the UI so analysts can quickly inspect results or export them for further work.
 
 ## Development tips
 - Use the application factory (`volta.app.create_app`) to create testing instances with custom configuration mappings.
