@@ -75,7 +75,7 @@ def options_meterid():
 
     sql = """
         SELECT DISTINCT meterid AS v
-        FROM prod.sales
+        FROM electricity.billing_records
         WHERE meterid IS NOT NULL
     """
     params = []

@@ -45,7 +45,7 @@ def chart_data():
         SELECT
           date_trunc('{trunc_unit}', {date_col}) AS bucket,
           {metric_sql}
-        FROM prod.sales
+        FROM electricity.billing_records
         WHERE {clause}
         GROUP BY 1
         ORDER BY 1;

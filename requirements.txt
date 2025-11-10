@@ -9,3 +9,4 @@ langchain
 openai
 matplotlib
 langchain-community
+openpyxl

@@ -89,7 +89,7 @@ The command loads environment variables, boots the Flask app, and opens your bro
 - **macOS (.app)** – After downloading the app bundle, Control-click the file in Finder, choose **Open**, and confirm the prompt so Gatekeeper trusts the unsigned build.
 
 ## Working with data
-1. **Initial load** – On first run, the app looks for CSV files that match `VOLTA_CSV_GLOB`. If it finds data, it builds the `prod.sales` table inside DuckDB; otherwise, it attempts to download a parquet file from `BUCKET_URL` using the provided Supabase API key.
+1. **Initial load** – On first run, the app looks for CSV files that match `VOLTA_CSV_GLOB`. If it finds data, it builds the `electricity.billing_records` table inside DuckDB; otherwise, it attempts to download a parquet file from `BUCKET_URL` using the provided Supabase API key.
 2. **Persisted warehouse** – DuckDB lives on disk (`data/warehouse.duckdb` by default) so rebuilds are only triggered when the table is missing or you call `rebuild_from_csv()` manually.
 3. **Uploading new CSVs** – Visit `/upload`, choose a CSV file, and submit. Valid files are ingested into the existing dataset, stored in DuckDB, and the temporary upload is deleted. The dashboard refreshes automatically once the new data is loaded.
 4. **Schema expectations** – The dashboard assumes numeric columns for each configured metric (`kwh`, `paymoney`, `ghc` by default) and uses `chargedate` for date filtering. Update `volta/config.py` if your dataset uses different column names.

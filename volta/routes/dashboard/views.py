@@ -12,15 +12,125 @@ from flask import (
     request,
     url_for,
 )
-
+from markupsafe import escape
 from . import bp, get_datastore, get_metrics, get_predictor
-
-from . import bp, get_datastore, get_metrics
 from .helpers import DEFAULT_METERID_LIMIT, build_params, build_unique_values, no_filters_selected
 
 PREDICT_ALL_AS_OF = "09-2020"
 PREVIEW_ROW_LIMIT = 10
 METRIC_COLUMNS = ["kwh", "ghc", "paymoney"]
+
+COLUMN_LABEL_DEFAULTS = {
+    "meterid": "Meter ID",
+    "forecast_date": "Forecast Month",
+    "horizon": "Horizon (Months Ahead)",
+    "kwh": "kWh",
+    "ghc": "GHC",
+    "paymoney": "Paymoney",
+}
+
+COLUMN_CLASS_MAP = {
+    "meterid": "text-nowrap text-center",
+    "forecast_date": "text-nowrap",
+    "horizon": "text-nowrap text-center",
+    "kwh": "text-nowrap text-end",
+    "ghc": "text-nowrap text-end",
+    "paymoney": "text-nowrap text-end",
+}
+
+
+def _format_prediction_value(column: str, value: object) -> str:
+    if value is None:
+        return "—"
+
+    try:
+        if pd.isna(value):
+            return "—"
+    except TypeError:
+        pass
+
+    if column == "forecast_date":
+        parsed = pd.to_datetime(value, errors="coerce")
+        if pd.isna(parsed):
+            return str(escape(str(value)))
+        return parsed.date().isoformat()
+
+    if column == "horizon":
+        try:
+            return f"{int(float(value))}"
+        except (TypeError, ValueError):
+            return str(escape(str(value)))
+
+    if column in METRIC_COLUMNS:
+        try:
+            return f"{float(value):,.2f}"
+        except (TypeError, ValueError):
+            return str(escape(str(value)))
+
+    return str(escape(str(value)))
+
+
+def _render_prediction_preview_table(
+    df: pd.DataFrame, limit: int = PREVIEW_ROW_LIMIT
+) -> str:
+    if df is None or df.empty or limit <= 0:
+        return ""
+
+    metrics_service = get_metrics()
+    column_labels = dict(COLUMN_LABEL_DEFAULTS)
+
+    if metrics_service:
+        # ``Metrics`` exposes a ``mapping`` attribute for label lookups.  Fall back to
+        # treating the object as a mapping if an alternative implementation is
+        # supplied via configuration.
+        service_mapping = getattr(metrics_service, "mapping", None)
+        if isinstance(service_mapping, dict):
+            column_labels.update(service_mapping)
+        else:
+            try:
+                column_labels.update(dict(metrics_service))  # type: ignore[arg-type]
+            except TypeError:
+                pass
+
+    priority_columns: list[str] = [
+        "meterid",
+        "forecast_date",
+        "horizon",
+        *METRIC_COLUMNS,
+    ]
+    columns: list[str] = [col for col in priority_columns if col in df.columns]
+    columns.extend(col for col in df.columns if col not in columns)
+
+    if not columns:
+        return ""
+
+    preview = df.loc[:, columns].head(limit)
+
+    header_cells: list[str] = []
+    for column in columns:
+        label = column_labels.get(column, column.replace("_", " ").title())
+        classes = COLUMN_CLASS_MAP.get(column, "text-nowrap")
+        header_cells.append(
+            f'<th scope="col" class="{classes}">{str(escape(str(label)))}</th>'
+        )
+
+    body_rows: list[str] = []
+    for row in preview.itertuples(index=False, name=None):
+        cells: list[str] = []
+        for column, value in zip(columns, row):
+            cell_classes = COLUMN_CLASS_MAP.get(column, "text-nowrap")
+            display_value = _format_prediction_value(column, value)
+            cells.append(f'<td class="{cell_classes}">{display_value}</td>')
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    table_html = (
+        '<table class="table table-sm table-striped table-hover align-middle mb-0">'
+        f"<thead class=\"table-light\"><tr>{''.join(header_cells)}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        "</table>"
+    )
+
+    return table_html
 
 
 def _normalize_month_end(as_of: str) -> pd.Timestamp | None:
@@ -87,7 +197,7 @@ def _collect_historical_monthly(
             SUM(kwh)   AS kwh,
             SUM(ghc)   AS ghc,
             SUM(paymoney) AS paymoney
-        FROM prod.sales
+        FROM electricity.billing_records
         WHERE {where_sql}
         GROUP BY 1
         ORDER BY 1
@@ -175,7 +285,7 @@ def _get_meter_last_date(meterid: str) -> str | None:
         rows = datastore.run_query(
             f"""
             SELECT MAX({date_col}) AS last_date
-            FROM prod.sales
+            FROM electricity.billing_records
             WHERE {date_col} IS NOT NULL
               AND meterid IS NOT NULL
               AND CAST(meterid AS VARCHAR) = ?
@@ -243,7 +353,7 @@ def index():
             meterids = datastore.run_query(
                 f"""
                 SELECT DISTINCT meterid AS v
-                FROM prod.sales
+                FROM electricity.billing_records
                 WHERE meterid IS NOT NULL
                 ORDER BY v
                 LIMIT {int(meter_cap)};
@@ -263,7 +373,7 @@ def index():
             locs = datastore.run_query(
                 f"""
                 SELECT DISTINCT CAST(loc AS VARCHAR) AS v
-                FROM prod.sales
+                FROM electricity.billing_records
                 WHERE {clause} AND loc IS NOT NULL
                 ORDER BY v;
                 """,
@@ -324,7 +434,7 @@ def predictions():
                 rows = datastore.run_query(
                     f"""
                     SELECT DISTINCT meterid AS v
-                    FROM prod.sales
+                    FROM electricity.billing_records
                     WHERE meterid IS NOT NULL
                     ORDER BY v
                     LIMIT {int(meter_cap)};
@@ -385,13 +495,8 @@ def predictions_predict_all():
     preview_html = ""
 
     if row_count:
-        preview_html = (
-            predictions_df.head(preview_rows)
-            .to_html(
-                classes="table table-sm table-striped table-hover mb-0",
-                index=False,
-                border=0,
-            )
+        preview_html = _render_prediction_preview_table(
+            predictions_df, preview_rows
         )
 
     return jsonify(
@@ -462,13 +567,8 @@ def predictions_predict_one():
     preview_html = ""
 
     if row_count:
-        preview_html = (
-            predictions_df.head(preview_rows)
-            .to_html(
-                classes="table table-sm table-striped table-hover mb-0",
-                index=False,
-                border=0,
-            )
+        preview_html = _render_prediction_preview_table(
+            predictions_df, preview_rows
         )
 
     return jsonify(
