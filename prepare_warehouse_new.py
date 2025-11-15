@@ -17,18 +17,36 @@ MERGED_TABLE = "merged_sales_customers"
 CLEAN_TABLE = "merged_sales_customers_clean"  # name for the final cleaned table
 
 
+import sys
+
+import sys
+from pathlib import Path
+import subprocess
+
 def run_script(script_name: str):
     """
     Run another Python script in the same directory as this script.
-    Raises if it fails.
+    Raises if it fails and prints stdout/stderr for debugging.
     """
     script_path = Path(__file__).resolve().parent / script_name
     if not script_path.exists():
         raise FileNotFoundError(f"Script not found: {script_path}")
-    subprocess.run(
-        ["python", str(script_path)],
-        check=True,
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        capture_output=True,
+        text=True,
     )
+
+    if result.returncode != 0:
+        print(f"\n=== ERROR running {script_name} ===")
+        print(">>> STDOUT:")
+        print(result.stdout)
+        print(">>> STDERR:")
+        print(result.stderr)
+        raise RuntimeError(f"{script_name} failed with exit code {result.returncode}")
+
+
 
 
 def connect_db():
@@ -63,12 +81,14 @@ def ensure_warehouse(con: duckdb.DuckDBPyConnection):
 
     if need_rebuild:
         print("Rebuilding warehouse_new with build_warehouse_new.py...")
-        run_script("build_warehouse_new.py")
+        # IMPORTANT: close the existing connection before rebuilding
         con.close()
+        run_script("build_warehouse_new.py")
         # reopen after rebuild
         con = connect_db()
 
     return con
+
 
 
 def ensure_links(con: duckdb.DuckDBPyConnection):
@@ -78,14 +98,16 @@ def ensure_links(con: duckdb.DuckDBPyConnection):
     """
     if not table_exists(con, MERGED_TABLE):
         print("Building merged_sales_customers with build_links.py...")
-        run_script("build_links.py")
+        # IMPORTANT: close current connection before running the builder
         con.close()
+        run_script("build_links.py")
         con = connect_db()
         if not table_exists(con, MERGED_TABLE):
             raise RuntimeError(
                 f"{MERGED_TABLE} still does not exist after running build_links.py"
             )
     return con
+
 
 
 def clean_and_save(con: duckdb.DuckDBPyConnection):
@@ -101,6 +123,7 @@ def clean_and_save(con: duckdb.DuckDBPyConnection):
         "meterid",
         "customer_no",
         "od_date",
+        "ocd_paymoney",
         "ocd_energy",
         "ocd_cash_received",
         "utility",
@@ -121,7 +144,7 @@ def clean_and_save(con: duckdb.DuckDBPyConnection):
         if c in df.columns:
             df[c] = df[c].astype("string")
 
-    float_cols = ["ocd_energy", "ocd_cash_received"]
+    float_cols = ["ocd_energy", "ocd_paymoney", "ocd_cash_received"]
     for c in float_cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")

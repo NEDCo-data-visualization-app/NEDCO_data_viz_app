@@ -39,7 +39,10 @@ def get_predictor():
         return path
 
     config = current_app.config
-    db_path = _resolve_path(config.get("DUCKDB_PATH", "data/warehouse.duckdb"), "data/warehouse.duckdb")
+    db_path = _resolve_path(
+        config.get("DUCKDB_PATH", "data/warehouse_new.duckdb"),
+        "data/warehouse_new.duckdb",
+    )
 
     bundle_path = config.get("PREDICTOR_BUNDLE_PATH")
     bundle_path = _resolve_path(bundle_path, "models/lgbm_bundle.pkl")

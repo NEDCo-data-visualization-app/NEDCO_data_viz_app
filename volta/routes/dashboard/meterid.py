@@ -66,7 +66,7 @@ def options_meterid():
         return jsonify(unique_values[:limit])
 
     q = (request.args.get("q") or "").strip()
-    loc = request.args.get("loc")
+    location_param = (request.args.get("utility") or "").strip()
     try:
         limit = int(request.args.get("limit") or 200)
     except (TypeError, ValueError):
@@ -75,13 +75,13 @@ def options_meterid():
 
     sql = """
         SELECT DISTINCT meterid AS v
-        FROM electricity.billing_records
+        FROM merged_sales_customers_clean
         WHERE meterid IS NOT NULL
     """
     params = []
-    if loc:
-        sql += " AND CAST(loc AS VARCHAR) = ?"
-        params.append(loc)
+    if location_param:
+        sql += " AND CAST(utility AS VARCHAR) = ?"
+        params.append(location_param)
     if q:
         sql += " AND CAST(meterid AS VARCHAR) ILIKE '%' || ? || '%'"
         params.append(q)

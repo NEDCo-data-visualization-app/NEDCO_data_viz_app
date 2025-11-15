@@ -21,7 +21,12 @@ def filter_options():
 
     payload = request.get_json(silent=True) or {}
 
-    cols_lc = {str(c).lower(): c for c in base.columns}
+    exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
+    cols_lc = {
+        str(c).lower(): c
+        for c in base.columns
+        if c not in exclude_cols
+    }
 
     raw_selections = payload.get("selections") or {}
     selections: Dict[str, List[str]] = {}
@@ -29,21 +34,23 @@ def filter_options():
         if not isinstance(values, (list, tuple)):
             continue
         real_col = cols_lc.get(str(in_key).lower())
-        if not real_col:
+        if not real_col or real_col in exclude_cols:
             continue
         cleaned = [str(v) for v in values if v not in (None, "")]
         if cleaned:
             selections[real_col] = cleaned
 
     facets_in = payload.get("facets") or []
+    resolved_facets: Dict[str, str] = {}
     if facets_in:
-        facets = [
-            cols_lc.get(str(f).lower())
-            for f in facets_in
-            if cols_lc.get(str(f).lower()) in base.columns
-        ]
+        for f in facets_in:
+            real = cols_lc.get(str(f).lower())
+            if real and real in base.columns:
+                resolved_facets[str(f)] = real
     else:
-        facets = [c for c in ["loc", "res_mapped", "meterid"] if c in base.columns]
+        for candidate in ["utility", "tariff_type", "meterid"]:
+            if candidate in base.columns:
+                resolved_facets[candidate] = candidate
 
     params = FilterParams(
         start=_parse_date(str(payload.get("start_date") or "")),
@@ -60,7 +67,7 @@ def filter_options():
         df = datastore.run_query(
             f"""
             SELECT DISTINCT CAST({col} AS VARCHAR) AS v
-            FROM electricity.billing_records
+            FROM merged_sales_customers_clean
             WHERE {clause} AND {col} IS NOT NULL
             ORDER BY v
             """,
@@ -71,8 +78,8 @@ def filter_options():
         return df["v"].astype(str).tolist()
 
     unique_values: Dict[str, List[str]] = {}
-    for col in facets:
-        unique_values[col] = distinct(col)
+    for display_col, real_col in resolved_facets.items():
+        unique_values[display_col] = distinct(real_col)
 
     meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
     if "meterid" in unique_values:
@@ -83,7 +90,7 @@ def filter_options():
         SELECT
           MIN(CAST({date_col} AS DATE)) AS dmin,
           MAX(CAST({date_col} AS DATE)) AS dmax
-        FROM prod.sales
+        FROM merged_sales_customers_clean
         WHERE {clause}
         """,
         sql_params,
@@ -96,7 +103,7 @@ def filter_options():
     )
 
     cdf = datastore.run_query(
-        f"SELECT COUNT(*) AS n FROM prod.sales WHERE {clause};",
+        f"SELECT COUNT(*) AS n FROM merged_sales_customers_clean WHERE {clause};",
         sql_params,
     )
     rows = int(cdf.iloc[0]["n"]) if cdf is not None else 0

@@ -69,9 +69,10 @@ def build_unique_values(df: pd.DataFrame, max_uniques: int = 200) -> Dict[str, L
     for column in df.columns:
         if column in exclude_cols:
             continue
+        display_col = column
         values = pd.Series(df[column].dropna().unique()).astype(str).tolist()
         values = sorted(set(values))[:max_uniques]
-        unique[column] = values
+        unique[display_col] = values
     return unique
 
 
@@ -105,6 +106,7 @@ def no_filters_selected(args, base_df: pd.DataFrame) -> bool:
 
 __all__ = [
     "DEFAULT_METERID_LIMIT",
+    "LEGACY_COLUMN_ALIASES",
     "_parse_date",
     "build_params",
     "build_unique_values",
