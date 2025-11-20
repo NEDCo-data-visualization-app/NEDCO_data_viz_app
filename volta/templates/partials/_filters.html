@@ -10,11 +10,11 @@
 
       <!-- Date range -->
       <div class="mb-3">
-        <label class="form-label">Starting date ({{ date_col }})</label>
+        <label class="form-label">Starting date</label>
         <input type="date" class="form-control" name="start_date" value="{{ start_value }}">
       </div>
       <div class="mb-3">
-        <label class="form-label">Ending date ({{ date_col }})</label>
+        <label class="form-label">Ending date</label>
         <input type="date" class="form-control" name="end_date" value="{{ end_value }}">
       </div>
 
@@ -22,8 +22,8 @@
 
       {% set display_names = {
         'meterid': 'Meter Number',
-        'loc': 'Location',
-        'res_mapped': "Account Type"
+        'utility': 'Location',
+        'tariff_type': "Account Type"
       } %}
 
       <div class="accordion" id="filtersAccordion">
