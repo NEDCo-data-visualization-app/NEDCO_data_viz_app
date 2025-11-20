@@ -19,11 +19,15 @@ def pie_data():
     filtered = params.apply(base, date_col)
 
     metric = metrics.validate(filtered, params.metric)
-    segment_col = (
-        "res_mapped"
-        if "res_mapped" in filtered.columns
-        else ("loc" if "loc" in filtered.columns else None)
-    )
+    if "tariff_type" in filtered.columns:
+        segment_col = "tariff_type"
+        segment_alias = "res_mapped"
+    elif "utility" in filtered.columns:
+        segment_col = "utility"
+        segment_alias = "loc"
+    else:
+        segment_col = None
+        segment_alias = ""
 
     if not metric or segment_col is None or filtered.empty:
         return jsonify(
@@ -31,7 +35,7 @@ def pie_data():
                 "labels": [],
                 "values": [],
                 "metric_label": params.metric or "",
-                "segment": segment_col or "",
+                "segment": segment_alias,
             }
         )
 
@@ -44,7 +48,7 @@ def pie_data():
                 "labels": [],
                 "values": [],
                 "metric_label": metrics.label(metric),
-                "segment": segment_col,
+                "segment": segment_alias,
             }
         )
 
@@ -67,7 +71,7 @@ def pie_data():
             "labels": labels,
             "values": values,
             "metric_label": metrics.label(metric),
-            "segment": segment_col,
+            "segment": segment_alias,
         }
     )
 
@@ -82,7 +86,8 @@ def bar_data():
     filtered = params.apply(base, date_col)
 
     metric = metrics.validate(filtered, params.metric)
-    city_col = "loc"
+    city_col = "utility"
+    city_alias = "utility"
 
     if not metric or city_col not in filtered.columns or filtered.empty:
         return jsonify(
@@ -90,7 +95,7 @@ def bar_data():
                 "labels": [],
                 "values": [],
                 "metric_label": params.metric or "",
-                "segment": city_col or "",
+                "segment": city_alias,
             }
         )
 
@@ -118,6 +123,6 @@ def bar_data():
             "labels": labels,
             "values": values,
             "metric_label": metrics.label(metric),
-            "segment": city_col,
+            "segment": city_alias,
         }
     )

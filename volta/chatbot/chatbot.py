@@ -13,10 +13,10 @@ load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 
 df = pd.read_csv("/Users/srinandham/Downloads/NEDCO_data_viz_app/wkfile_shiny.csv") 
-print(df["chargedate"].min(), df["chargedate"].max())
-techiman_df = df[df['loc'] == 'Techiman [13]']  
-percentile_64 = techiman_df['kwh'].quantile(0.64)
-print("64th percentile of kwh for Techiman:", percentile_64) 
+print(df["od_date"].min(), df["od_date"].max())
+techiman_df = df[df['utility'] == 'Techiman [13]']
+percentile_64 = techiman_df['ocd_energy'].quantile(0.64)
+print("64th percentile of energy for Techiman:", percentile_64)
 
 '''
 Working models from OpenRouter: 

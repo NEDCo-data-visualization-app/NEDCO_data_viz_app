@@ -18,24 +18,30 @@ from .helpers import DEFAULT_METERID_LIMIT, build_params, build_unique_values, n
 
 PREDICT_ALL_AS_OF = "09-2020"
 PREVIEW_ROW_LIMIT = 10
-METRIC_COLUMNS = ["kwh", "ghc", "paymoney"]
+METRIC_COLUMNS = ["ocd_energy", "ocd_cash_received", "ocd_paymoney"]
+
+LEGACY_PREDICTION_OUTPUT = {
+    "kwh": "ocd_energy",
+    "ghc": "ocd_cash_received",
+    "paymoney": "ocd_paymoney",
+}
 
 COLUMN_LABEL_DEFAULTS = {
     "meterid": "Meter ID",
     "forecast_date": "Forecast Month",
     "horizon": "Horizon (Months Ahead)",
-    "kwh": "kWh",
-    "ghc": "GHC",
-    "paymoney": "Paymoney",
+    "ocd_energy": "Energy (kWh)",
+    "ocd_cash_received": "Cash Received (GHC)",
+    "ocd_paymoney": "Paymoney",
 }
 
 COLUMN_CLASS_MAP = {
     "meterid": "text-nowrap text-center",
     "forecast_date": "text-nowrap",
     "horizon": "text-nowrap text-center",
-    "kwh": "text-nowrap text-end",
-    "ghc": "text-nowrap text-end",
-    "paymoney": "text-nowrap text-end",
+    "ocd_energy": "Energy (kWh)",
+    "ocd_cash_received": "Cash Received (GHC)",
+    "ocd_paymoney": "text-nowrap text-end",
 }
 
 
@@ -171,12 +177,41 @@ def _serialize_monthly(df: pd.DataFrame, date_column: str) -> list[dict[str, obj
         rows.append(item)
     return rows
 
+def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Map internal metric column names to legacy API keys for predictions charts."""
+
+    converted: list[dict[str, object]] = []
+    for row in records:
+        item: dict[str, object] = {}
+        if "month" in row:
+            item["month"] = row["month"]
+        for legacy_key, new_key in LEGACY_PREDICTION_OUTPUT.items():
+            item[legacy_key] = row.get(new_key)
+        converted.append(item)
+    return converted
+
+
+
+def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Map internal metric column names to legacy API keys for predictions charts."""
+
+    converted: list[dict[str, object]] = []
+    for row in records:
+        item: dict[str, object] = {}
+        if "month" in row:
+            item["month"] = row["month"]
+        for legacy_key, new_key in LEGACY_PREDICTION_OUTPUT.items():
+            item[legacy_key] = row.get(new_key)
+        converted.append(item)
+    return converted
+
+
 
 def _collect_historical_monthly(
     as_of: str, *, meterid: str | None = None
 ) -> list[dict[str, object]]:
     datastore = get_datastore()
-    date_col = current_app.config.get("DATE_COL", "chargedate")
+    date_col = current_app.config.get("DATE_COL", "od_date")
     cutoff = _normalize_month_end(as_of)
 
     if cutoff is None:
@@ -194,10 +229,10 @@ def _collect_historical_monthly(
     sql = f"""
         SELECT
             CAST(date_trunc('month', {date_col}) AS DATE) AS month,
-            SUM(kwh)   AS kwh,
-            SUM(ghc)   AS ghc,
-            SUM(paymoney) AS paymoney
-        FROM electricity.billing_records
+            SUM(ocd_energy)   AS ocd_energy,
+            SUM(ocd_cash_received)   AS ocd_cash_received,
+            SUM(ocd_paymoney) AS ocd_paymoney
+        FROM merged_sales_customers_clean
         WHERE {where_sql}
         GROUP BY 1
         ORDER BY 1
@@ -279,13 +314,13 @@ def _get_meter_last_date(meterid: str) -> str | None:
         return None
 
     datastore = get_datastore()
-    date_col = current_app.config.get("DATE_COL", "chargedate")
+    date_col = current_app.config.get("DATE_COL", "od_date")
 
     try:
         rows = datastore.run_query(
             f"""
             SELECT MAX({date_col}) AS last_date
-            FROM electricity.billing_records
+            FROM merged_sales_customers_clean
             WHERE {date_col} IS NOT NULL
               AND meterid IS NOT NULL
               AND CAST(meterid AS VARCHAR) = ?
@@ -353,7 +388,7 @@ def index():
             meterids = datastore.run_query(
                 f"""
                 SELECT DISTINCT meterid AS v
-                FROM electricity.billing_records
+                FROM merged_sales_customers_clean
                 WHERE meterid IS NOT NULL
                 ORDER BY v
                 LIMIT {int(meter_cap)};
@@ -363,7 +398,7 @@ def index():
         except Exception:
             pass
 
-    if "loc" in base.columns:
+    if "utility" in base.columns:
         try:
             clause, sql_params = params.to_sql_where(
                 date_col=date_col,
@@ -372,14 +407,14 @@ def index():
 
             locs = datastore.run_query(
                 f"""
-                SELECT DISTINCT CAST(loc AS VARCHAR) AS v
-                FROM electricity.billing_records
-                WHERE {clause} AND loc IS NOT NULL
+                SELECT DISTINCT CAST(utility AS VARCHAR) AS v
+                FROM merged_sales_customers_clean
+                WHERE {clause} AND utility IS NOT NULL
                 ORDER BY v;
                 """,
                 sql_params,
             )["v"].astype(str).tolist()
-            unique_values["loc"] = locs
+            unique_values["utility"] = locs
         except Exception:
             pass
 
@@ -434,7 +469,7 @@ def predictions():
                 rows = datastore.run_query(
                     f"""
                     SELECT DISTINCT meterid AS v
-                    FROM electricity.billing_records
+                    FROM merged_sales_customers_clean
                     WHERE meterid IS NOT NULL
                     ORDER BY v
                     LIMIT {int(meter_cap)};
@@ -485,10 +520,14 @@ def predictions_predict_all():
     if predictions_df is None:
         predictions_df = pd.DataFrame()
 
-    forecast_monthly = _collect_forecast_monthly(predictions_df)
+    forecast_monthly = _convert_to_legacy_metrics(
+        _collect_forecast_monthly(predictions_df)
+    )
     historical_monthly: list[dict[str, object]] = []
     if forecast_monthly:
-        historical_monthly = _collect_historical_monthly(as_of)
+        historical_monthly = _convert_to_legacy_metrics(
+            _collect_historical_monthly(as_of)
+        )
 
     row_count = int(len(predictions_df))
     preview_rows = min(PREVIEW_ROW_LIMIT, row_count)
@@ -557,10 +596,14 @@ def predictions_predict_one():
     if predictions_df is None:
         predictions_df = pd.DataFrame()
 
-    forecast_monthly = _collect_forecast_monthly(predictions_df)
+    forecast_monthly = _convert_to_legacy_metrics(
+        _collect_forecast_monthly(predictions_df)
+    )
     historical_monthly: list[dict[str, object]] = []
     if forecast_monthly:
-        historical_monthly = _collect_historical_monthly(as_of, meterid=meterid_raw)
+        historical_monthly = _convert_to_legacy_metrics(
+            _collect_historical_monthly(as_of)
+        )
 
     row_count = int(len(predictions_df))
     preview_rows = min(PREVIEW_ROW_LIMIT, row_count)
@@ -624,6 +667,11 @@ def predictions_download():
             predictions_df = pd.DataFrame()
 
         filename = "predict_all.csv"
+        
+
+    if not predictions_df.empty:
+        rename_map = {new: legacy for legacy, new in LEGACY_PREDICTION_OUTPUT.items()}
+        predictions_df = predictions_df.rename(columns=rename_map)
 
     csv_content = predictions_df.to_csv(index=False)
     response = make_response(csv_content)

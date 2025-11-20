@@ -42,7 +42,7 @@ NEDCO_data_viz_app/
 ## Prerequisites
 - Python 3.9 or newer
 - `pip` and `virtualenv` (or another environment manager)
-- Optional: DuckDB CLI for inspecting the warehouse (`duckdb data/warehouse.duckdb`)
+- Optional: DuckDB CLI for inspecting the warehouse (`duckdb data/warehouse_new.duckdb`)
 
 ## Setup
 1. **Clone the repository**
@@ -68,11 +68,11 @@ BUCKET_URL=""
 SUPABASE_KEY=""
 
 # DuckDB configuration (paths are relative to the repo root by default)
-VOLTA_DUCKDB_PATH="data/warehouse.duckdb"
+VOLTA_DUCKDB_PATH="data/warehouse_new.duckdb"
 VOLTA_CSV_GLOB="data/uploads/*.csv"
 
 # Dataset column overrides (only set these if your columns differ)
-VOLTA_DATE_COL="chargedate"
+VOLTA_DATE_COL="od_date"
 VOLTA_DATE_FMT="%d-%b-%y"
 ```
 Any value present in `.env` overrides the defaults defined in `volta/config.py`.
@@ -89,10 +89,10 @@ The command loads environment variables, boots the Flask app, and opens your bro
 - **macOS (.app)** – After downloading the app bundle, Control-click the file in Finder, choose **Open**, and confirm the prompt so Gatekeeper trusts the unsigned build.
 
 ## Working with data
-1. **Initial load** – On first run, the app looks for CSV files that match `VOLTA_CSV_GLOB`. If it finds data, it builds the `electricity.billing_records` table inside DuckDB; otherwise, it attempts to download a parquet file from `BUCKET_URL` using the provided Supabase API key.
-2. **Persisted warehouse** – DuckDB lives on disk (`data/warehouse.duckdb` by default) so rebuilds are only triggered when the table is missing or you call `rebuild_from_csv()` manually.
+1. **Initial load** – On first run, the app looks for CSV files that match `VOLTA_CSV_GLOB`. If it finds data, it builds the `merged_sales_customers_clean` table inside DuckDB; otherwise, it attempts to download a parquet file from `BUCKET_URL` using the provided Supabase API key.
+2. **Persisted warehouse** – DuckDB lives on disk (`data/warehouse_new.duckdb` by default) so rebuilds are only triggered when the table is missing or you call `rebuild_from_csv()` manually.
 3. **Uploading new CSVs** – Visit `/upload`, choose a CSV file, and submit. Valid files are ingested into the existing dataset, stored in DuckDB, and the temporary upload is deleted. The dashboard refreshes automatically once the new data is loaded.
-4. **Schema expectations** – The dashboard assumes numeric columns for each configured metric (`kwh`, `paymoney`, `ghc` by default) and uses `chargedate` for date filtering. Update `volta/config.py` if your dataset uses different column names.
+4. **Schema expectations** – The dashboard assumes numeric columns for each configured metric (`ocd_energy`, `ocd_paymoney`, `ocd_cash_received` by default) and uses `od_date` for date filtering. Update `volta/config.py` if your dataset uses different column names.
 
 ## Dashboard walkthrough
 - **Filters panel** – Stickied on the left, providing date pickers, accordion-based categorical filters, a meter ID search, and quick-reset controls.
@@ -115,7 +115,7 @@ The command loads environment variables, boots the Flask app, and opens your bro
 ## Forecast model
 The predictions view is powered by the LightGBM-based `PredictorLGBM` service (`volta/services/predictor.py`). Highlights include:
 
-- **Model bundle** – The serialized artifact (`models/lgbm_bundle.pkl`) stores either a multi-output booster or three per-target boosters (`kwh`, `ghc`, `paymoney`). The loader inspects the bundle to determine whether to dispatch a shared model or individual estimators.
+- **Model bundle** – The serialized artifact (`models/lgbm_bundle.pkl`) stores either a multi-output booster or three per-target boosters (`ocd_energy`, `ocd_cash_received`, `ocd_paymoney`). The loader inspects the bundle to determine whether to dispatch a shared model or individual estimators.
 - **Feature engineering** – Forecasts draw on 47 engineered features covering monthly seasonality (sine/cosine encodings), categorical encodings for location and residential flags, lagged metrics, rolling means/standard deviations (3- and 6-month windows), cumulative statistics, and first/second-order deltas for each target. Features are assembled from DuckDB snapshots at run time.
 - **Recursive horizon** – The `predict_recursive` (fleet) and `predict_recursive_one` (single meter) methods iteratively score the LightGBM model(s), append the predicted month to the working snapshot, and rebuild features for the next horizon. This keeps the forecast autoregressive while preserving location/residential metadata for downstream joins.
 - **Aggregation helpers** – Forecast data frames are aggregated to monthly totals for charting, and both previews and CSV downloads are surfaced to the UI so analysts can quickly inspect results or export them for further work.

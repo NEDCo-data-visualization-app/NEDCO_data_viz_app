@@ -19,7 +19,7 @@ class Config:
     # Data paths
     # -------------------------
     # DuckDB database file (main store)
-    DUCKDB_PATH = Path(os.getenv("VOLTA_DUCKDB_PATH", Path.home() / "Downloads" / "volta" / "warehouse.duckdb"))
+    DUCKDB_PATH = Path(os.getenv("VOLTA_DUCKDB_PATH", "data/warehouse_new.duckdb"))
 
     # Location of incoming CSVs (from client uploads)
     UPLOADS_DIR = Path.home() / "Downloads" / "volta" / "uploads"
@@ -28,7 +28,7 @@ class Config:
     # -------------------------
     # Data schema
     # -------------------------
-    DATE_COL = os.getenv("VOLTA_DATE_COL", "chargedate")
+    DATE_COL = os.getenv("VOLTA_DATE_COL", "od_date")
 
     # -------------------------
     # External services (optional legacy path)
@@ -41,26 +41,23 @@ class Config:
     # -------------------------
     # Hide these from the checkbox UI
     EXCLUDE_COLS = {
-        "chargedate",
-        "chargedate_str",
+        "od_date",
+        "od_date_str",
         "month",
         "month_str",
         "year",
-        "kwh",
-        "ghc",
-        "paymoney",
-        "res",
+        "ocd_energy",
+        "ocd_cash_received",
+        "ocd_paymoney",
     }
-
-    RES_MAP = {"N-Resid [0]": "Commercial", "Resid [1]": "Residential"}
 
     # -------------------------
     # Centralized metrics & frequency config
     # -------------------------
     METRICS: Dict[str, str] = {
-        "kwh": "kWh",
-        "paymoney": "Pay",
-        "ghc": "GHC",
+        "ocd_energy": "Energy (kWh)",
+        "ocd_paymoney": "Paymoney",
+        "ocd_cash_received": "Cash Received (GHC)",
     }
 
     FREQ_RULE: Dict[str, str] = {

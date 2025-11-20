@@ -27,7 +27,7 @@ class FilterParams:
         Return a filtered dataframe based on the stored parameters (pandas).
 
         Applies INTERSECTION (AND) across:
-          - All categorical selections (meterid, loc, res_mapped, etc.)
+          - All categorical selections (meterid, utility, tariff_type, etc.)
           - Date range [start, end] inclusive
 
         Handles dtype mismatches by comparing categorical columns as strings.
