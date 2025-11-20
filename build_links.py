@@ -1,7 +1,7 @@
 # build_links.py
 # Build only the final merged table using sales_2012_2017, sales_2018_2019,
 # and customer_list_xls (cleaned: header-in-rows -> proper columns).
-# Meter key rule: digits only -> last 11 digits.
+# Meter key rule: digits only -> pad to 14 digits, take last 14.
 
 import re
 from pathlib import Path
@@ -53,10 +53,12 @@ def pick_meter_col_from_df(df: pd.DataFrame) -> str:
             return c
     raise RuntimeError(f"No meter-like column in cleaned customer DF. Columns: {df.columns.tolist()}")
 
-def digits_last11(series: pd.Series) -> pd.Series:
+# ✔ NEW normalization rule
+def norm14(series: pd.Series) -> pd.Series:
     return (series.astype(str)
                   .str.replace(r"\D", "", regex=True)
-                  .str[-11:]
+                  .str.zfill(14)          
+                  .str[-14:]              
                   .fillna(""))
 
 def find_table(con, want_exact: str, fallbacks: list[str]) -> str:
@@ -66,7 +68,6 @@ def find_table(con, want_exact: str, fallbacks: list[str]) -> str:
     for f in fallbacks:
         if f in names:
             return f
-    # heuristic LIKE search
     all_names = con.sql("SELECT name FROM duckdb_tables()").fetchdf()["name"].str.lower().tolist()
     if want_exact.startswith("sales_2012"):
         c = [n for n in all_names if "sales" in n and "2012" in n]
@@ -87,37 +88,33 @@ def main():
     # discover required input tables (prefer xls for customers)
     t_sales_a = find_table(con, "sales_2012_2017", ["electricity_sales_2012_2017"])
     t_sales_b = find_table(con, "sales_2018_2019", ["electricity_sales_2018_2019"])
-    t_cust    = find_table(con, "customer_list_xls", ["customer_list"])  # no xlsx fallback on purpose
+    t_cust    = find_table(con, "customer_list_xls", ["customer_list"])
 
     missing = [n for n in [t_sales_a, t_sales_b, t_cust] if not n]
     if missing:
         print("Tables present:\n", con.sql("SHOW TABLES").fetchdf())
         raise SystemExit("Required tables not found. Adjust names in build_links.py or rebuild ingestion.")
 
-    # one-time safety: ensure no leftovers from older scripts
     con.execute("DROP TABLE IF EXISTS electricity_sales_all;")
     con.execute("DROP TABLE IF EXISTS electricity_sales_all_norm;")
 
-    # ---- Clean customer_list_xls (header row inside data) ----
+    # ---- Clean customer_list_xls ----
     raw = con.sql(f'SELECT * FROM "{t_cust}"').fetchdf()
     cust = promote_header(raw)
 
-    # drop junk columns you don't want in merged output
     junk_cols = {"techiman", "year_month", "date_only", "source_sheet"}
     cust = cust.drop(columns=[c for c in cust.columns if c.lower() in junk_cols], errors="ignore")
 
     meter_col = pick_meter_col_from_df(cust)
-    cust["meter_no_norm"] = digits_last11(cust[meter_col])
+    cust["meter_no_norm"] = norm14(cust[meter_col])
     cust = cust[cust["meter_no_norm"].ne("")].drop_duplicates("meter_no_norm")
 
-    # register cleaned customers as temp view
     con.register("customers_norm_df", cust)
 
-    # build explicit customer column list (exclude meter_no_norm to avoid dup)
     cust_cols = [c for c in cust.columns if c != "meter_no_norm"]
     cust_select = ", ".join([f'c."{c}"' for c in cust_cols]) if cust_cols else "/* no extra customer cols */"
 
-    # ---- Final merged table ONLY (no persisted intermediates) ----
+    # ---- Final merged table ----
     con.execute(f"""
         CREATE OR REPLACE TABLE merged_sales_customers AS
         WITH sales_all AS (
@@ -128,7 +125,7 @@ def main():
         sales_norm AS (
             SELECT
                 s.*,
-                RIGHT(regexp_replace(CAST(meterid AS VARCHAR), '[^0-9]', ''), 11) AS meterid_norm
+                RIGHT(LPAD(regexp_replace(CAST(meterid AS VARCHAR), '[^0-9]', ''), 14, '0'), 14) AS meterid_norm
             FROM sales_all s
         )
         SELECT
@@ -136,18 +133,31 @@ def main():
             c.meter_no_norm AS customer_meter_no_norm
             {"," if cust_cols else ""} {cust_select}
         FROM sales_norm s
-        JOIN customers_norm_df c
+        LEFT JOIN customers_norm_df c
           ON s.meterid_norm = c.meter_no_norm;
     """)
 
-    # quick QA
-    span = con.sql("""
-        SELECT COUNT(*) AS rows, MIN(od_date) AS min_dt, MAX(od_date) AS max_dt
-        FROM merged_sales_customers
-    """).fetchdf()
-    print(span.to_string(index=False))
+    # ---- Stats output requested ----
+    stats = con.sql("""
+        SELECT
+            COUNT(*) AS total_rows,
+            COUNT(c.meter_no_norm) AS matched,
+            COUNT(*) - COUNT(c.meter_no_norm) AS unmatched
+        FROM merged_sales_customers m
+        LEFT JOIN customers_norm_df c
+        ON m.meterid_norm = c.meter_no_norm;
+    """).fetchdf().iloc[0]
 
-    # cleanup temp
+    total = int(stats["total_rows"])
+    matched = int(stats["matched"])
+    unmatched = int(stats["unmatched"])
+    perc_unmatched = (unmatched / total) * 100 if total else 0
+
+    print(f"Matched meterids     : {matched}")
+    print(f"Unmatched meterids   : {unmatched}")
+    print(f"Total rows           : {total}")
+    print(f"Percent unmatched    : {perc_unmatched:.4f}%")
+
     con.unregister("customers_norm_df")
     con.close()
     print("Done: merged_sales_customers created.")
