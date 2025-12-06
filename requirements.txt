@@ -10,3 +10,4 @@ openai
 matplotlib
 langchain-community
 openpyxl
+xlrd
