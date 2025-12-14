@@ -190,6 +190,42 @@ def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[st
         converted.append(item)
     return converted
 
+def _prepare_predictions_df(predictions_df: pd.DataFrame | None) -> pd.DataFrame:
+    """Rename predictor outputs to the columns expected by the UI."""
+
+    if predictions_df is None:
+        return pd.DataFrame()
+
+    rename_map = {
+        "prediction_date": "forecast_date",
+        "paymoney_pred": "ocd_paymoney",
+        "energy_pred": "ocd_energy",
+        "cash_pred": "ocd_cash_received",
+    }
+
+    df = predictions_df.rename(columns=rename_map)
+
+    if "forecast_date" in df.columns:
+        df["forecast_date"] = pd.to_datetime(df["forecast_date"], errors="coerce")
+
+    return df
+
+
+def _extract_as_of(predictions_df: pd.DataFrame) -> str | None:
+    """Return the latest as_of date from the predictions frame if present."""
+
+    if "as_of" not in predictions_df.columns or predictions_df.empty:
+        return None
+
+    ts = pd.to_datetime(predictions_df["as_of"], errors="coerce")
+    ts = ts.dropna()
+    if ts.empty:
+        return None
+
+    return ts.max().date().isoformat()
+
+
+
 
 
 def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -284,7 +320,12 @@ def _collect_forecast_monthly(predictions_df: pd.DataFrame) -> list[dict[str, ob
         return []
 
     if "forecast_date" not in predictions_df.columns:
-        return []
+        if "prediction_date" in predictions_df.columns:
+            predictions_df = predictions_df.rename(
+                columns={"prediction_date": "forecast_date"}
+            )
+        else:
+            return []
 
     metrics = [col for col in METRIC_COLUMNS if col in predictions_df.columns]
     if not metrics:
@@ -356,6 +397,48 @@ def _get_meter_last_date(meterid: str) -> str | None:
         last_date = date_series.max()
         if pd.notna(last_date):
             return last_date.date().isoformat()
+
+    return None
+
+def _get_dataset_last_date() -> str | None:
+    datastore = get_datastore()
+    date_col = current_app.config.get("DATE_COL", "od_date")
+
+    try:
+        rows = datastore.run_query(
+            f"""
+            SELECT MAX({date_col}) AS last_date
+            FROM merged_sales_customers_clean
+            WHERE {date_col} IS NOT NULL
+            """
+        )
+        if not rows.empty:
+            value = rows.at[0, "last_date"] if "last_date" in rows.columns else None
+            ts = pd.to_datetime(value, errors="coerce")
+            if pd.notna(ts):
+                return ts.date().isoformat()
+    except Exception:
+        current_app.logger.exception("Unable to determine last date for dataset via SQL")
+
+    base = datastore.get(copy=True)
+    if base.empty:
+        return None
+
+    date_col_ref = next(
+        (col for col in base.columns if str(col).lower() == str(date_col).lower()),
+        None,
+    )
+
+    if date_col_ref:
+        try:
+            date_series = pd.to_datetime(base[date_col_ref], errors="coerce").dropna()
+        except Exception:
+            date_series = pd.Series(dtype="datetime64[ns]")
+
+        if not date_series.empty:
+            last_date = date_series.max()
+            if pd.notna(last_date):
+                return last_date.date().isoformat()
 
     return None
 
@@ -490,21 +573,22 @@ def predictions():
     )
 
 
-def _run_predict_all(as_of: str = PREDICT_ALL_AS_OF):
+def _run_predict_all():
     predictor = get_predictor()
-    return predictor.predict_recursive(as_of=as_of)
+    return _prepare_predictions_df(predictor.predict_all_from_db())
 
 
-def _run_predict_one(meterid: int, as_of: str):
+
+def _run_predict_one(meterid: int):
     predictor = get_predictor()
-    return predictor.predict_recursive_one(meterid=meterid, as_of=as_of)
+    return _prepare_predictions_df(
+        predictor.predict_one_meter_from_db(meterid=meterid)
+    )
 
 
 def predictions_predict_all():
-    as_of = PREDICT_ALL_AS_OF
-
     try:
-        predictions_df = _run_predict_all(as_of)
+        predictions_df = _run_predict_all()
     except Exception:  # pragma: no cover - defensive logging
         current_app.logger.exception("Predict All request failed")
         return (
@@ -519,6 +603,10 @@ def predictions_predict_all():
 
     if predictions_df is None:
         predictions_df = pd.DataFrame()
+
+    as_of = _extract_as_of(predictions_df)
+    if not as_of:
+        as_of = _get_dataset_last_date()
 
     forecast_monthly = _convert_to_legacy_metrics(
         _collect_forecast_monthly(predictions_df)
@@ -545,13 +633,8 @@ def predictions_predict_all():
             "preview_rows": preview_rows,
             "preview_html": preview_html,
             "as_of": as_of,
-            "scope": "all",
-            "charts": {
-                "historical": historical_monthly,
-                "forecast": forecast_monthly,
-            },
-        }
-    )
+            }
+        )
 
 
 def predictions_predict_one():
@@ -580,7 +663,7 @@ def predictions_predict_one():
         )
 
     try:
-        predictions_df = _run_predict_one(meterid_int, as_of)
+        predictions_df = _run_predict_one(meterid_int)
     except Exception:  # pragma: no cover - defensive logging
         current_app.logger.exception("Predict meter request failed")
         return (
@@ -596,13 +679,18 @@ def predictions_predict_one():
     if predictions_df is None:
         predictions_df = pd.DataFrame()
 
+    inferred_as_of = _extract_as_of(predictions_df)
+    if inferred_as_of:
+        as_of = inferred_as_of
+
+
     forecast_monthly = _convert_to_legacy_metrics(
         _collect_forecast_monthly(predictions_df)
     )
     historical_monthly: list[dict[str, object]] = []
     if forecast_monthly:
         historical_monthly = _convert_to_legacy_metrics(
-            _collect_historical_monthly(as_of)
+            _collect_historical_monthly(as_of, meterid=meterid_raw)
         )
 
     row_count = int(len(predictions_df))
@@ -645,7 +733,7 @@ def predictions_download():
             return make_response("No historical data found for the selected meter", 404)
 
         try:
-            predictions_df = _run_predict_one(meterid_int, as_of)
+            predictions_df = _run_predict_one(meterid_int)
         except Exception:  # pragma: no cover - defensive logging
             current_app.logger.exception("Predict meter download failed")
             return make_response("Unable to generate predictions", 500)
@@ -658,7 +746,7 @@ def predictions_download():
         as_of = PREDICT_ALL_AS_OF
 
         try:
-            predictions_df = _run_predict_all(as_of)
+            predictions_df = _run_predict_all()
         except Exception:  # pragma: no cover - defensive logging
             current_app.logger.exception("Predict All download failed")
             return make_response("Unable to generate predictions", 500)

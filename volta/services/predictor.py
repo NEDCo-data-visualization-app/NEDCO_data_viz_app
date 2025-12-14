@@ -499,7 +499,7 @@
 #             return pd.DataFrame(columns=["meterid", "forecast_date", "horizon", "kwh", "ghc", "paymoney"])
 #         return pd.concat(all_preds, ignore_index=True).sort_values(["horizon"]).reset_index(drop=True)
 
-ffrom __future__ import annotations
+from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, Optional, Iterable
 

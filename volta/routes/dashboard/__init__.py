@@ -40,20 +40,20 @@ def get_predictor():
 
     config = current_app.config
     db_path = _resolve_path(
-        config.get("DUCKDB_PATH", "data/warehouse_new.duckdb"),
+        config.get("DUCKDB_PATH"),
         "data/warehouse_new.duckdb",
     )
 
-    bundle_path = config.get("PREDICTOR_BUNDLE_PATH")
-    bundle_path = _resolve_path(bundle_path, "models/lgbm_bundle.pkl")
+    model_dir = _resolve_path(
+        config.get("PREDICTOR_MODEL_DIR", "models"), "models"
+    )
 
-    features_path = config.get("PREDICTOR_FEATURES_PATH")
-    features_path = _resolve_path(features_path, "models/feature_cols.json")
+    raw_table = config.get("PREDICTOR_RAW_TABLE", "merged_sales_customers_clean")
 
     predictor = PredictorLGBM(
+        model_dir=model_dir,
         db_path=db_path,
-        bundle_path=bundle_path,
-        features_path=features_path,
+        raw_table=raw_table,
     )
 
     current_app.extensions["predictor"] = predictor
