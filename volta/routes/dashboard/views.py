@@ -633,8 +633,13 @@ def predictions_predict_all():
             "preview_rows": preview_rows,
             "preview_html": preview_html,
             "as_of": as_of,
-            }
-        )
+            "scope": "all",
+            "charts": {
+                "historical": historical_monthly,
+                "forecast": forecast_monthly,
+            },
+        }
+    )
 
 
 def predictions_predict_one():
