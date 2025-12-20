@@ -1,4 +1,4 @@
-"""Meter ID options endpoint."""
+"""Meter ID options endpoint (BigQuery-native)."""
 
 from __future__ import annotations
 
@@ -15,79 +15,67 @@ from volta.utils.filter_params import FilterParams
 def options_meterid():
     """Return distinct meter IDs respecting filters and search queries."""
     datastore = get_datastore()
+    date_col = current_app.config["DATE_COL"]
+
+    # ---------- Determine parameters ----------
+    q = ""
+    selections: Dict[str, List[str]] = {}
+    start_date = end_date = None
+    limit = 200
 
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
         q = str(payload.get("q") or "").strip()
         try:
-            limit = int(payload.get("limit") or 200)
+            limit = max(int(payload.get("limit") or 200), 1)
         except (TypeError, ValueError):
             limit = 200
-        limit = max(limit, 1)
-
-        base = datastore.get(copy=False)
-        if base.empty or "meterid" not in base.columns:
-            return jsonify([])
 
         raw_selections = payload.get("selections") or {}
-        selections: Dict[str, List[str]] = {}
+        for k, v in raw_selections.items():
+            if isinstance(v, (list, tuple)):
+                cleaned = [str(x) for x in v if x not in (None, "")]
+                if cleaned:
+                    selections[k] = cleaned
 
-        cols_lc = {str(c).lower(): c for c in base.columns}
-        meterid_real = cols_lc.get("meterid", "meterid")
+        start_date = _parse_date(str(payload.get("start_date") or ""))
+        end_date = _parse_date(str(payload.get("end_date") or ""))
 
-        for in_key, values in raw_selections.items():
-            if not isinstance(values, (list, tuple)):
-                continue
-            real_col = cols_lc.get(str(in_key).lower())
-            if not real_col:
-                continue
-            if str(real_col).lower() == "meterid":
-                continue
-            cleaned = [str(v) for v in values if v not in (None, "")]
-            if cleaned:
-                selections[real_col] = cleaned
+    else:  # GET
+        q = (request.args.get("q") or "").strip()
+        try:
+            limit = max(int(request.args.get("limit") or 200), 1)
+        except (TypeError, ValueError):
+            limit = 200
+        loc = (request.args.get("utility") or "").strip()
+        if loc:
+            selections["utility"] = [loc]
 
-        params = FilterParams(
-            start=_parse_date(str(payload.get("start_date") or "")),
-            end=_parse_date(str(payload.get("end_date") or "")),
-            selections=selections,
-        )
+        start_date = _parse_date(str(request.args.get("start_date") or ""))
+        end_date = _parse_date(str(request.args.get("end_date") or ""))
 
-        date_col = current_app.config["DATE_COL"]
-        filtered = params.apply(base, date_col)
-        if filtered.empty or meterid_real not in filtered.columns:
-            return jsonify([])
+    # ---------- Build SQL ----------
+    sql = f"SELECT DISTINCT CAST(meterid AS STRING) AS v FROM `{datastore.TABLE_NAME}` WHERE meterid IS NOT NULL"
+    sql_params: dict[str, object] = {}
 
-        series = filtered[meterid_real].dropna().astype(str)
-        if q:
-            series = series[series.str.contains(q, case=False, na=False)]
+    if start_date:
+        sql += f" AND {date_col} >= @start_date"
+        sql_params["start_date"] = start_date.isoformat() if hasattr(start_date, "isoformat") else str(start_date)
+    if end_date:
+        sql += f" AND {date_col} <= @end_date"
+        sql_params["end_date"] = end_date.isoformat() if hasattr(end_date, "isoformat") else str(end_date)
 
-        unique_values = sorted(set(series.tolist()))
-        return jsonify(unique_values[:limit])
+    for col, values in selections.items():
+        if values:
+            sql += f" AND {col} IN UNNEST(@{col})"
+            sql_params[col] = values
 
-    q = (request.args.get("q") or "").strip()
-    location_param = (request.args.get("utility") or "").strip()
-    try:
-        limit = int(request.args.get("limit") or 200)
-    except (TypeError, ValueError):
-        limit = 200
-    limit = max(limit, 1)
-
-    sql = """
-        SELECT DISTINCT meterid AS v
-        FROM merged_sales_customers_clean
-        WHERE meterid IS NOT NULL
-    """
-    params = []
-    if location_param:
-        sql += " AND CAST(utility AS VARCHAR) = ?"
-        params.append(location_param)
     if q:
-        sql += " AND CAST(meterid AS VARCHAR) ILIKE '%' || ? || '%'"
-        params.append(q)
+        sql += " AND CAST(meterid AS STRING) LIKE CONCAT('%', @q, '%')"
+        sql_params["q"] = q
 
-    sql += " ORDER BY v LIMIT ?"
-    params.append(limit)
+    sql += f" ORDER BY v LIMIT {limit}"
 
-    rows = datastore.run_query(sql, params)
-    return jsonify(rows["v"].astype(str).tolist())
+    # ---------- Execute ----------
+    df = datastore.run_query(sql, sql_params)
+    return jsonify(df["v"].astype(str).tolist() if df is not None else [])

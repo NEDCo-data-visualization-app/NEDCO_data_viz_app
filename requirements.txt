@@ -11,3 +11,7 @@ matplotlib
 langchain-community
 openpyxl
 xlrd
+joblib
+lightgbm==4.6.0
+google-cloud-bigquery
+db-dtypes

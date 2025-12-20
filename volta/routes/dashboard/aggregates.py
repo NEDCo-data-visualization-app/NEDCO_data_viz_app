@@ -14,48 +14,53 @@ def pie_data():
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
     metrics = get_metrics()
-    base = datastore.get(copy=False)
-    params = build_params(request.args, base)
-    filtered = params.apply(base, date_col)
 
-    metric = metrics.validate(filtered, params.metric)
-    if "tariff_type" in filtered.columns:
+    # Build params from request args
+    base_df = current_app.config.get("BASE_DF", pd.DataFrame())
+    params = build_params(request.args, base_df)
+
+    # Validate metric
+    metric = metrics.validate(base_df, params.metric)
+    if not metric:
+        return jsonify({"labels": [], "values": [], "metric_label": params.metric or "", "segment": ""})
+
+    # Determine segment
+    if "tariff_type" in base_df.columns:
         segment_col = "tariff_type"
         segment_alias = "res_mapped"
-    elif "utility" in filtered.columns:
+    elif "utility" in base_df.columns:
         segment_col = "utility"
         segment_alias = "loc"
     else:
         segment_col = None
         segment_alias = ""
 
-    if not metric or segment_col is None or filtered.empty:
-        return jsonify(
-            {
-                "labels": [],
-                "values": [],
-                "metric_label": params.metric or "",
-                "segment": segment_alias,
-            }
-        )
+    if segment_col is None:
+        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": segment_alias})
 
-    series = filtered.dropna(subset=[segment_col]).copy()
-    series[metric] = pd.to_numeric(series[metric], errors="coerce")
-    series = series.dropna(subset=[metric])
+    # Build BigQuery SQL
+    sql = f"""
+        SELECT {segment_col}, SUM({metric}) AS metric_sum
+        FROM `{datastore.TABLE_NAME}`
+        GROUP BY {segment_col}
+    """
+
+    # Execute query
+    df = datastore.run_query(sql)
+
+    if df is None or df.empty:
+        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": segment_alias})
+
+    # Process series
+    series = df.dropna(subset=[segment_col, "metric_sum"]).copy()
+    series["metric_sum"] = pd.to_numeric(series["metric_sum"], errors="coerce")
+    series = series.dropna(subset=["metric_sum"])
     if series.empty:
-        return jsonify(
-            {
-                "labels": [],
-                "values": [],
-                "metric_label": metrics.label(metric),
-                "segment": segment_alias,
-            }
-        )
+        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": segment_alias})
 
-    grp = series.groupby(series[segment_col].astype(str))[metric].sum().sort_values(
-        ascending=False
-    )
+    grp = series.groupby(series[segment_col].astype(str))["metric_sum"].sum().sort_values(ascending=False)
 
+    # Top N logic
     top_n = 8
     if len(grp) > top_n:
         top = grp.iloc[:top_n]
@@ -66,14 +71,7 @@ def pie_data():
         labels = grp.index.tolist()
         values = [float(v) for v in grp.values]
 
-    return jsonify(
-        {
-            "labels": labels,
-            "values": values,
-            "metric_label": metrics.label(metric),
-            "segment": segment_alias,
-        }
-    )
+    return jsonify({"labels": labels, "values": values, "metric_label": metrics.label(metric), "segment": segment_alias})
 
 
 @bp.route("/bar-data", methods=["GET"])
@@ -81,48 +79,36 @@ def bar_data():
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
     metrics = get_metrics()
-    base = datastore.get(copy=False)
-    params = build_params(request.args, base)
-    filtered = params.apply(base, date_col)
 
-    metric = metrics.validate(filtered, params.metric)
+    base_df = current_app.config.get("BASE_DF", pd.DataFrame())
+    params = build_params(request.args, base_df)
+
+    metric = metrics.validate(base_df, params.metric)
     city_col = "utility"
     city_alias = "utility"
 
-    if not metric or city_col not in filtered.columns or filtered.empty:
-        return jsonify(
-            {
-                "labels": [],
-                "values": [],
-                "metric_label": params.metric or "",
-                "segment": city_alias,
-            }
-        )
+    if not metric:
+        return jsonify({"labels": [], "values": [], "metric_label": params.metric or "", "segment": city_alias})
 
-    series = filtered.dropna(subset=[city_col]).copy()
-    series[metric] = pd.to_numeric(series[metric], errors="coerce")
-    series = series.dropna(subset=[metric])
+    sql = f"""
+        SELECT {city_col}, SUM({metric}) AS metric_sum
+        FROM `{datastore.TABLE_NAME}`
+        GROUP BY {city_col}
+    """
+
+    df = datastore.run_query(sql)
+
+    if df is None or df.empty:
+        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": city_alias})
+
+    series = df.dropna(subset=[city_col, "metric_sum"]).copy()
+    series["metric_sum"] = pd.to_numeric(series["metric_sum"], errors="coerce")
+    series = series.dropna(subset=["metric_sum"])
     if series.empty:
-        return jsonify(
-            {
-                "labels": [],
-                "values": [],
-                "metric_label": metrics.label(metric),
-                "segment": city_col,
-            }
-        )
+        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": city_alias})
 
-    grp = series.groupby(series[city_col].astype(str))[metric].sum().sort_values(
-        ascending=False
-    )
-
+    grp = series.groupby(series[city_col].astype(str))["metric_sum"].sum().sort_values(ascending=False)
     labels = grp.index.tolist()
     values = [float(v) for v in grp.values]
-    return jsonify(
-        {
-            "labels": labels,
-            "values": values,
-            "metric_label": metrics.label(metric),
-            "segment": city_alias,
-        }
-    )
+
+    return jsonify({"labels": labels, "values": values, "metric_label": metrics.label(metric), "segment": city_alias})

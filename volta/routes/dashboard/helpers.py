@@ -23,7 +23,7 @@ def _parse_date(value: str) -> Optional[date]:
         return parsed.date() if pd.notna(parsed) else None
 
 
-def build_params(args, base_df: pd.DataFrame) -> FilterParams:
+def build_params(args, base_df: None) -> FilterParams:
     """Build ``FilterParams`` from request args with case-insensitive columns."""
     selections: Dict[str, List[str]] = {}
     exclude_cols = current_app.config["EXCLUDE_COLS"]

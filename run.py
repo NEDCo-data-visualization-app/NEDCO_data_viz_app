@@ -7,10 +7,7 @@ from threading import Timer
 from volta.app import create_app
 from dotenv import load_dotenv
 
-if getattr(sys, "frozen", False):
-    load_dotenv(os.path.join(sys._MEIPASS, ".env"))
-else:
-    load_dotenv()  
+load_dotenv()
 
 app = create_app()
 
