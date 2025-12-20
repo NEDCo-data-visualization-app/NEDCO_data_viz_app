@@ -22,10 +22,7 @@ import os
 import sys
 from .routes.upload import upload_bp
 
-
-def create_app(
-    config_object: Optional[Union[str, Mapping[str, Any], type]] = None,
-) -> Flask:
+def create_app(config_object: Optional[Union[str, Mapping[str, Any], type]] = None,) -> Flask:
     """Create and configure the Flask application."""
 
     if getattr(sys, "frozen", False):
@@ -33,7 +30,7 @@ def create_app(
         static_folder = os.path.join(sys._MEIPASS, "volta", "static")
         app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
     else:
-        app = Flask(__name__) 
+        app = Flask(__name__)
 
     if config_object is None:
         app.config.from_object(Config)
@@ -42,15 +39,24 @@ def create_app(
     else:
         app.config.from_object(config_object)
 
+    # ✅ Instantiate services
     metrics = Metrics(app.config["METRICS"])
     datastore = DataStore(app.config, metrics)
 
+    # ✅ Attach to app
     app.extensions["metrics"] = metrics
     app.extensions["datastore"] = datastore
 
+    # ✅ FETCH BIGQUERY SCHEMA ONCE AT STARTUP
+    try:
+        app.config["BQ_COLUMNS"] = datastore.get_columns()
+        logger.info("Loaded BigQuery columns: %s", app.config["BQ_COLUMNS"])
+    except Exception:
+        logger.exception("Failed to load BigQuery schema")
+        app.config["BQ_COLUMNS"] = set()
+
+    # ✅ Register routes AFTER schema is known
     app.register_blueprint(bp)
     app.register_blueprint(upload_bp)
+
     return app
-
-
-__all__ = ["create_app"]

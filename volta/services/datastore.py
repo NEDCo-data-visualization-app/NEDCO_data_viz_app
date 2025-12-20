@@ -3,6 +3,7 @@ import logging
 from typing import Any, Dict, Mapping, Optional, Union
 import pandas as pd
 from google.cloud import bigquery
+import datetime
 
 logger = logging.getLogger("volta")
 TABLE_NAME = "volta-test-481721.test123.table_test"
@@ -24,14 +25,29 @@ class DataStore:
 
     def run_query(self, sql: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
         client = self._connect()
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter(k, "STRING", v)
-                for k, v in (params or {}).items()
-            ]
-        )
+
+        query_params = []
+        for k, v in (params or {}).items():
+            if isinstance(v, (datetime.date, datetime.datetime, pd.Timestamp)):
+                query_params.append(bigquery.ScalarQueryParameter(k, "DATE", v))
+            elif isinstance(v, int):
+                query_params.append(bigquery.ScalarQueryParameter(k, "INT64", v))
+            elif isinstance(v, float):
+                query_params.append(bigquery.ScalarQueryParameter(k, "FLOAT64", v))
+            elif v is None:
+                # Use a STRING NULL by default
+                query_params.append(bigquery.ScalarQueryParameter(k, "STRING", None))
+            else:
+                query_params.append(bigquery.ScalarQueryParameter(k, "STRING", str(v)))
+
+        job_config = bigquery.QueryJobConfig(query_parameters=query_params)
         query_job = client.query(sql, job_config=job_config)
         return query_job.result().to_dataframe()
+
+    def get_columns(self) -> set[str]:
+        client = self._connect()
+        table = client.get_table(self.TABLE_NAME)
+        return {schema_field.name for schema_field in table.schema}
 
     # Example queries
 

@@ -104,6 +104,7 @@ export function drawLineTotals(seriesDict, canvasEl) {
   if (!window.Chart || !canvasEl) return;
 
   const labels = seriesDict?.labels || [];
+  console.log('Totals data:', seriesDict);
   if (!labels.length) {
     canvasEl.parentElement.innerHTML =
       '<div class="text-muted text-center py-4">No total data for current filters.</div>';

@@ -56,7 +56,7 @@ def chart_data():
             DATE_TRUNC({date_col}, {trunc_sql}) AS bucket,
             {metric_sql}
         FROM `{datastore.TABLE_NAME}`
-        WHERE {where_clause}
+        WHERE {date_col} BETWEEN DATE('{sql_params["date_from"]}') AND DATE('{sql_params["date_to"]}')
         GROUP BY bucket
         ORDER BY bucket
     """

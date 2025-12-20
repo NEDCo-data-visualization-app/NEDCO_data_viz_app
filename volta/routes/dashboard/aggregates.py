@@ -1,4 +1,4 @@
-"""Aggregate chart endpoints."""
+"""Aggregate chart endpoints (BigQuery version with filters)."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from .helpers import build_params
 
 @bp.route("/pie-data", methods=["GET"])
 def pie_data():
+    """Returns a pie chart series, respecting frontend filters."""
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
     metrics = get_metrics()
 
-    # Build params from request args
     base_df = current_app.config.get("BASE_DF", pd.DataFrame())
     params = build_params(request.args, base_df)
 
@@ -24,7 +24,7 @@ def pie_data():
     if not metric:
         return jsonify({"labels": [], "values": [], "metric_label": params.metric or "", "segment": ""})
 
-    # Determine segment
+    # Determine segment column
     if "tariff_type" in base_df.columns:
         segment_col = "tariff_type"
         segment_alias = "res_mapped"
@@ -38,20 +38,31 @@ def pie_data():
     if segment_col is None:
         return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": segment_alias})
 
-    # Build BigQuery SQL
+    # Build BigQuery SQL with filter support
     sql = f"""
         SELECT {segment_col}, SUM({metric}) AS metric_sum
         FROM `{datastore.TABLE_NAME}`
+        WHERE 1=1
+          AND (@date_from IS NULL OR {date_col} >= @date_from)
+          AND (@date_to IS NULL OR {date_col} <= @date_to)
+          AND (@utility IS NULL OR utility = @utility)
+          AND (@tariff_type IS NULL OR tariff_type = @tariff_type)
         GROUP BY {segment_col}
     """
 
-    # Execute query
-    df = datastore.run_query(sql)
+    sql_params = {
+        "date_from": getattr(params, "date_from", None),
+        "date_to": getattr(params, "date_to", None),
+        "utility": getattr(params, "utility", None),
+        "tariff_type": getattr(params, "tariff_type", None),
+    }
+
+    df = datastore.run_query(sql, sql_params)
 
     if df is None or df.empty:
         return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": segment_alias})
 
-    # Process series
+    # Clean and group data
     series = df.dropna(subset=[segment_col, "metric_sum"]).copy()
     series["metric_sum"] = pd.to_numeric(series["metric_sum"], errors="coerce")
     series = series.dropna(subset=["metric_sum"])
@@ -76,6 +87,7 @@ def pie_data():
 
 @bp.route("/bar-data", methods=["GET"])
 def bar_data():
+    """Returns a bar chart series, respecting frontend filters."""
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
     metrics = get_metrics()
@@ -90,13 +102,26 @@ def bar_data():
     if not metric:
         return jsonify({"labels": [], "values": [], "metric_label": params.metric or "", "segment": city_alias})
 
+    # BigQuery SQL with filter support
     sql = f"""
         SELECT {city_col}, SUM({metric}) AS metric_sum
         FROM `{datastore.TABLE_NAME}`
+        WHERE 1=1
+          AND (@date_from IS NULL OR {date_col} >= @date_from)
+          AND (@date_to IS NULL OR {date_col} <= @date_to)
+          AND (@utility IS NULL OR utility = @utility)
+          AND (@tariff_type IS NULL OR tariff_type = @tariff_type)
         GROUP BY {city_col}
     """
 
-    df = datastore.run_query(sql)
+    sql_params = {
+        "date_from": getattr(params, "date_from", None),
+        "date_to": getattr(params, "date_to", None),
+        "utility": getattr(params, "utility", None),
+        "tariff_type": getattr(params, "tariff_type", None),
+    }
+
+    df = datastore.run_query(sql, sql_params)
 
     if df is None or df.empty:
         return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": city_alias})
