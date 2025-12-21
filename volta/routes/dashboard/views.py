@@ -186,11 +186,6 @@ def index():
     except Exception:
         unique_values["utility"] = []
 
-    # Fetch preview rows
-    preview_rows = datastore.run_query(
-        f"SELECT * FROM '{current_app.config["PARQUET_PATH"]}' ORDER BY {date_col} DESC LIMIT {PREVIEW_ROW_LIMIT}"
-    )
-
     # Determine start and end date values
     start_value = end_value = ""
     try:
@@ -209,13 +204,14 @@ def index():
     except Exception:
         current_app.logger.exception("Failed to fetch start/end dates from datastore")
 
-    stats = datastore.compute_stats(preview_rows)
-    summary = datastore.compute_summary(preview_rows)
+    full_rows = datastore.run_query(f"SELECT * FROM '{current_app.config['PARQUET_PATH']}' WHERE {filters} ORDER BY {date_col} DESC")
+    stats = datastore.compute_stats(full_rows)
+    summary = datastore.compute_summary(full_rows)
 
-    chart_metrics = metrics.available(preview_rows)
+    chart_metrics = metrics.available(full_rows)
     default_metric = chart_metrics[0][0] if chart_metrics else ""
 
-    preview_html = _render_prediction_preview_table(preview_rows, PREVIEW_ROW_LIMIT)
+    preview_html = _render_prediction_preview_table(full_rows, PREVIEW_ROW_LIMIT)
 
     return render_template(
         "index.html",
@@ -226,8 +222,8 @@ def index():
         end_value=end_value,
         unique_values=unique_values,
         args=request.args,
-        total_rows=len(preview_rows),
-        total_cols=len(preview_rows[0]) if preview_rows else 0,
+        total_rows=len(full_rows),
+        total_cols=len(full_rows[0]) if full_rows else 0,
         preview_html=preview_html,
         chart_metrics=chart_metrics,
         default_metric=default_metric,
