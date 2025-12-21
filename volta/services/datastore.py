@@ -1,5 +1,3 @@
-"""Data access and aggregation helpers - query Parquet only, no caching or loading."""
-
 from __future__ import annotations
 import logging
 from typing import Any, Dict, Mapping, Union
@@ -11,41 +9,34 @@ logger = logging.getLogger("volta")
 
 
 class DataStore:
-    """DataStore that queries a Parquet file directly with DuckDB without storing anything in memory."""
+    """DataStore that queries a Parquet file directly using a persistent DuckDB connection."""
 
     def __init__(self, config: Mapping[str, Any], metrics: Metrics):
         self.config = config
         self.metrics = metrics
-        self._columns: list[str] | None = None 
-        self.parquet_path = self.config.get(
-            "PARQUET_PATH",
-            "/Users/srinandham/Downloads/NEDCO_data_viz_app/data/test.parquet",
-        )
+        self._columns: list[str] | None = None
+        self.parquet_path = self.config["PARQUET_PATH"]  # mandatory
+        self._con = duckdb.connect(database=self.config["DB_PATH"], read_only=True)
+
         self.date_col = self.config.get("DATE_COL", "od_date")
 
-    # ---------- DuckDB helpers ----------
-
-    def _connect(self) -> duckdb.DuckDBPyConnection:
-        """Return a fresh in-memory DuckDB connection."""
-        return duckdb.connect(database=":memory:")
-    
     def get_columns(self) -> list[str]:
-        """Get column names from Parquet (cached)."""
+        """Get column names from the table (cached)."""
         if self._columns is None:
-            con = self._connect()
-            con.execute(f"DESCRIBE '{self.parquet_path}'")
-            self._columns = [row[0] for row in con.fetchall()]
-            con.close()
+            try:
+                sql = f'DESCRIBE "{self.parquet_path}"'
+                self._columns = [row[0] for row in self._con.execute(sql).fetchall()]
+            except Exception as e:
+                logger.error("Failed to fetch columns: %s", e)
+                self._columns = []
         return self._columns
 
     def run_query(self, sql: str, params=None) -> list[dict[str, Any]]:
-        """Execute SQL and return results as list-of-dicts."""
+        """Execute SQL with persistent connection and return results as list-of-dicts."""
         try:
-            con = self._connect()
-            cur = con.execute(sql, params or [])
+            cur = self._con.execute(sql, params or [])
             cols = [c[0] for c in cur.description]
             rows = cur.fetchall()
-            con.close()
             return [dict(zip(cols, r)) for r in rows]
         except Exception as e:
             logger.error("DuckDB query failed: %s", e)
@@ -58,7 +49,7 @@ class DataStore:
         SELECT
             date_trunc('day', {self.date_col}) AS day,
             SUM(amount) AS total_amount
-        FROM '{self.parquet_path}'
+        FROM "{self.parquet_path}"
         WHERE {self.date_col} BETWEEN ? AND ?
           AND (? IS NULL OR country = ?)
           AND (? IS NULL OR category = ?)
@@ -73,7 +64,7 @@ class DataStore:
         SELECT
             category,
             SUM(amount) AS total_amount
-        FROM '{self.parquet_path}'
+        FROM "{self.parquet_path}"
         WHERE {self.date_col} BETWEEN ? AND ?
         GROUP BY category
         ORDER BY total_amount DESC
@@ -86,7 +77,7 @@ class DataStore:
         SELECT
             {self.date_col} AS od_date,
             country, category, amount
-        FROM '{self.parquet_path}'
+        FROM "{self.parquet_path}"
         WHERE {self.date_col} BETWEEN ? AND ?
           AND (? IS NULL OR country = ?)
         ORDER BY {self.date_col} DESC
@@ -98,7 +89,6 @@ class DataStore:
     # ---------- Stats / summary ----------
 
     def compute_stats(self, rows: list[dict[str, Any]]) -> Dict[str, Dict[str, Union[float, str]]]:
-        """Compute sum, mean, median, min, max for available metrics using Metrics class."""
         stats: Dict[str, Dict[str, Union[float, str]]] = {}
         for key in self.metrics.keys(rows):
             vals = [r[key] for r in rows if r.get(key) is not None]
@@ -117,7 +107,6 @@ class DataStore:
         return stats
 
     def compute_summary(self, rows: list[dict[str, Any]]) -> Dict[str, Union[int, str, None]]:
-        """Compute dataset summary for list-of-dicts dataset."""
         out: Dict[str, Union[int, str, None]] = {
             "rows": len(rows),
             "cols": len(rows[0]) if rows else 0,

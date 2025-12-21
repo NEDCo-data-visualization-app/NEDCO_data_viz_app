@@ -13,7 +13,8 @@ from flask import (
 )
 from markupsafe import escape
 from . import bp, get_datastore, get_metrics, get_predictor
-from .helpers import DEFAULT_METERID_LIMIT, no_filters_selected
+from .helpers import DEFAULT_METERID_LIMIT, no_filters_selected, build_params, build_unique_values
+from volta.utils.filter_params import FilterParams
 
 PREDICT_ALL_AS_OF = "09-2020"
 PREVIEW_ROW_LIMIT = 10
@@ -111,17 +112,17 @@ def _collect_historical_monthly(as_of: str, meterid: str | None = None) -> list[
         params.append(str(meterid))
 
     where_sql = " AND ".join(clauses)
-    sql = f"""
+    sql = f'''
         SELECT
             CAST(date_trunc('month', {date_col}) AS TEXT) AS month,
             SUM(ocd_energy) AS ocd_energy,
             SUM(ocd_cash_received) AS ocd_cash_received,
             SUM(ocd_paymoney) AS ocd_paymoney
-        FROM '{current_app.config["PARQUET_PATH"]}'
+        FROM "{current_app.config["PARQUET_PATH"]}"
         WHERE {where_sql}
         GROUP BY 1
         ORDER BY 1
-    """
+    '''
     try:
         rows = datastore.run_query(sql, params)
         return rows
@@ -166,53 +167,51 @@ def index():
     metrics = get_metrics()
     date_col = current_app.config.get("DATE_COL", "od_date")
 
-    # Build unique meter & utility values
-    meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
-    unique_values = {}
+    # Step 1: get columns from DuckDB
+    columns = datastore.get_columns()
+    if not columns:
+        return render_template("upload.html")
 
-    try:
-        meters = datastore.run_query(
-            f"SELECT DISTINCT meterid AS v FROM '{current_app.config["PARQUET_PATH"]}' WHERE meterid IS NOT NULL ORDER BY v LIMIT {meter_cap}"
-        )
-        unique_values["meterid"] = [str(r["v"]) for r in meters]
-    except Exception:
-        unique_values["meterid"] = []
+    # Step 2: build FilterParams from request.args
+    params = build_params(request.args, base_columns=columns)
 
-    try:
-        utilities = datastore.run_query(
-            f"SELECT DISTINCT CAST(utility AS VARCHAR) AS v FROM '{current_app.config["PARQUET_PATH"]}' WHERE utility IS NOT NULL ORDER BY v"
-        )
-        unique_values["utility"] = [str(r["v"]) for r in utilities]
-    except Exception:
-        unique_values["utility"] = []
+    # Step 3: construct WHERE clause from FilterParams
+    if params.selections or params.start or params.end:
+        clause, sql_params = params.to_sql_where(date_col=date_col, available_columns=columns)
+    else:
+        clause = ""
+        sql_params = []
 
-    # Determine start and end date values
+    # Step 4: fetch filtered rows from DuckDB
+    sql = f'SELECT * FROM "{current_app.config["PARQUET_PATH"]}"'
+    if clause:
+        sql += f" WHERE {clause}"
+    filtered_rows = datastore.run_query(sql, sql_params)
+
+    # Step 5: compute start/end dates
     start_value = end_value = ""
-    try:
-        result = datastore.run_query(
-            f"""
-            SELECT
-                MIN({date_col}) AS start_date,
-                MAX({date_col}) AS end_date
-            FROM '{current_app.config["PARQUET_PATH"]}'
-            WHERE {date_col} IS NOT NULL
-            """
-        )
-        if result:
-            start_value = result[0].get("start_date", "") or ""
-            end_value = result[0].get("end_date", "") or ""
-    except Exception:
-        current_app.logger.exception("Failed to fetch start/end dates from datastore")
+    if filtered_rows:
+        dates = [r[date_col] for r in filtered_rows if r.get(date_col)]
+        if dates:
+            start_value = min(dates)
+            end_value = max(dates)
 
-    full_rows = datastore.run_query(f"SELECT * FROM '{current_app.config['PARQUET_PATH']}' WHERE {filters} ORDER BY {date_col} DESC")
-    stats = datastore.compute_stats(full_rows)
-    summary = datastore.compute_summary(full_rows)
+    # Step 6: build unique meter & utility values with limits
+    meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
+    unique_values = build_unique_values(datastore, ["meterid", "utility"], clause, sql_params, max_uniques=meter_cap)
 
-    chart_metrics = metrics.available(full_rows)
+    # Step 7: compute stats and summary
+    stats = datastore.compute_stats(filtered_rows)
+    summary = datastore.compute_summary(filtered_rows)
+
+    # Step 8: chart metrics
+    chart_metrics = metrics.available(filtered_rows)
     default_metric = chart_metrics[0][0] if chart_metrics else ""
 
-    preview_html = _render_prediction_preview_table(full_rows, PREVIEW_ROW_LIMIT)
+    # Step 9: render preview table
+    preview_html = _render_prediction_preview_table(filtered_rows, PREVIEW_ROW_LIMIT)
 
+    # Step 10: render template
     return render_template(
         "index.html",
         date_col=date_col,
@@ -222,8 +221,8 @@ def index():
         end_value=end_value,
         unique_values=unique_values,
         args=request.args,
-        total_rows=len(full_rows),
-        total_cols=len(full_rows[0]) if full_rows else 0,
+        total_rows=len(filtered_rows),
+        total_cols=len(filtered_rows[0]) if filtered_rows else 0,
         preview_html=preview_html,
         chart_metrics=chart_metrics,
         default_metric=default_metric,
@@ -237,7 +236,7 @@ def predictions():
 
     try:
         rows = datastore.run_query(
-            f"SELECT DISTINCT meterid AS v FROM '{current_app.config["PARQUET_PATH"]}' WHERE meterid IS NOT NULL ORDER BY v LIMIT {meter_cap}"
+            f'SELECT DISTINCT meterid AS v FROM "{current_app.config["PARQUET_PATH"]}" WHERE meterid IS NOT NULL ORDER BY v LIMIT {meter_cap}'
         )
         meter_options = [str(r["v"]) for r in rows]
     except Exception:

@@ -1,7 +1,8 @@
 # Forecasting & notebooks dependencies
 duckdb
 pandas
-notebook ipykernel
+notebook 
+ipykernel
 matplotlib
 prophet
 tensorflow

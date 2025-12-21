@@ -19,7 +19,7 @@ def filter_options():
     exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
 
     # Use first row to determine columns
-    probe = datastore.run_query(f"SELECT * FROM '{current_app.config["PARQUET_PATH"]}' LIMIT 1")
+    probe = datastore.run_query(f'SELECT * FROM "{current_app.config["PARQUET_PATH"]}" LIMIT 1')
     if not probe:
         return jsonify({"options": {}, "dates": {"min": "", "max": ""}, "rows": 0})
 
@@ -67,12 +67,12 @@ def filter_options():
     # ---------- Helper to get distinct values ----------
     def distinct(col: str) -> List[str]:
         rows = datastore.run_query(
-            f"""
+            f'''
             SELECT DISTINCT CAST({col} AS VARCHAR) AS v
-            FROM '{current_app.config["PARQUET_PATH"]}'
+            FROM "{current_app.config["PARQUET_PATH"]}"
             WHERE {clause} AND {col} IS NOT NULL
             ORDER BY v
-            """,
+            ''',
             sql_params,
         )
         return [str(r["v"]) for r in rows] if rows else []
@@ -87,13 +87,13 @@ def filter_options():
 
     # ---------- Min/max date ----------
     date_rows = datastore.run_query(
-        f"""
+        f'''
         SELECT
           MIN(CAST({date_col} AS DATE)) AS dmin,
           MAX(CAST({date_col} AS DATE)) AS dmax
-        FROM '{current_app.config["PARQUET_PATH"]}'
+        FROM "{current_app.config["PARQUET_PATH"]}"
         WHERE {clause}
-        """,
+        ''',
         sql_params,
     )
     date_min = date_rows[0]["dmin"].isoformat() if date_rows and date_rows[0]["dmin"] else ""
@@ -101,9 +101,10 @@ def filter_options():
 
     # ---------- Row count ----------
     count_rows = datastore.run_query(
-        f"SELECT COUNT(*) AS n FROM '{current_app.config["PARQUET_PATH"]}' WHERE {clause};",
+        f'SELECT COUNT(*) AS n FROM "{current_app.config["PARQUET_PATH"]}" WHERE {clause};',
         sql_params,
     )
+
     rows = int(count_rows[0]["n"]) if count_rows else 0
 
     return jsonify(

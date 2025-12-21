@@ -33,6 +33,7 @@ class Config:
     BUCKET_URL = os.getenv("BUCKET_URL")
     SUPABASE_KEY = os.getenv("SUPABASE_KEY")
     PARQUET_PATH = os.getenv("PARQUET_PATH")
+    DB_PATH = os.getenv("DB_PATH")
 
     # -------------------------
     # UI filters

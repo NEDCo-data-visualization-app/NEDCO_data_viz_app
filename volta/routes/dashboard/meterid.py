@@ -41,12 +41,12 @@ def options_meterid():
             available_columns=None  # allow filtering on any column
         )
 
-        sql = f"""
+        sql = f'''
             SELECT DISTINCT CAST(meterid AS VARCHAR) AS v
-            FROM '{current_app.config["PARQUET_PATH"]}'
+            FROM "{current_app.config["PARQUET_PATH"]}"
             WHERE {clause}
               AND meterid IS NOT NULL
-        """
+        '''
         if q:
             sql += " AND CAST(meterid AS VARCHAR) ILIKE '%' || ? || '%'"
             sql_params.append(q)
@@ -66,11 +66,13 @@ def options_meterid():
         limit = 200
     limit = max(limit, 1)
 
+    parquet_table = f'"{current_app.config["PARQUET_PATH"]}"'
     sql = f"""
-        SELECT DISTINCT CAST(meterid AS VARCHAR) AS v
-        FROM '{current_app.config["PARQUET_PATH"]}'
-        WHERE meterid IS NOT NULL
+    SELECT DISTINCT CAST(meterid AS VARCHAR) AS v
+    FROM {parquet_table}
+    WHERE meterid IS NOT NULL
     """
+
     params: List[str] = []
 
     if location_param:

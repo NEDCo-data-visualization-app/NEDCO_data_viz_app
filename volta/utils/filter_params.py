@@ -21,40 +21,6 @@ class FilterParams:
     freq: Freq = "D"
     metric: Optional[str] = None
 
-    # -------- pandas path --------
-    def apply(self, df: pd.DataFrame, date_col: str) -> pd.DataFrame:
-        """
-        Return a filtered dataframe based on the stored parameters (pandas).
-
-        Applies INTERSECTION (AND) across:
-          - All categorical selections (meterid, utility, tariff_type, etc.)
-          - Date range [start, end] inclusive
-
-        Handles dtype mismatches by comparing categorical columns as strings.
-        """
-        out = df
-
-        # Normalize all selection values to strings
-        normalized: Dict[str, List[str]] = {
-            col: [str(v) for v in vals if v not in (None, "")]
-            for col, vals in (self.selections or {}).items()
-            if vals
-        }
-
-        # Apply categorical filters
-        for col, vals in normalized.items():
-            if col in out.columns and vals:
-                out = out[out[col].astype(str).isin(vals)]
-
-        # Apply date range (inclusive)
-        if date_col in out.columns:
-            if self.start is not None:
-                out = out[out[date_col] >= pd.Timestamp(self.start)]
-            if self.end is not None:
-                out = out[out[date_col] <= pd.Timestamp(self.end)]
-
-        return out
-
     # -------- SQL helpers --------
     def trunc_unit(self) -> str:
         """Map UI frequency to DuckDB date_trunc unit."""

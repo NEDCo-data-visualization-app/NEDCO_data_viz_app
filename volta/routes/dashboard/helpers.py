@@ -34,7 +34,6 @@ def build_params(args, base_columns: Optional[List[str]] = None) -> FilterParams
     exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
     cols_lc = {str(c).lower(): c for c in (base_columns or [])}
 
-    # Parse selections from request args
     if base_columns:
         for column in base_columns:
             if column in exclude_cols:
@@ -43,7 +42,6 @@ def build_params(args, base_columns: Optional[List[str]] = None) -> FilterParams
             if values:
                 selections[column] = [str(v) for v in values]
 
-    # Include any additional keys in args that match known columns
     for key in args.keys():
         if key in selections:
             continue
@@ -68,15 +66,17 @@ def build_params(args, base_columns: Optional[List[str]] = None) -> FilterParams
     )
 
 
+
 def build_unique_values(
     datastore,
     columns: List[str],
     clause: str = "",
     sql_params: Optional[List] = None,
-    max_uniques: int = 200,
+    max_uniques: Optional[int] = None,  # optional
 ) -> Dict[str, List[str]]:
     """
     Build unique values for given columns by querying DuckDB.
+    This mimics df[column].unique() in Pandas without loading all rows.
     """
     unique: Dict[str, List[str]] = {}
     exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
@@ -84,28 +84,36 @@ def build_unique_values(
     for column in columns:
         if column in exclude_cols:
             continue
-        sql = f"SELECT DISTINCT CAST({column} AS VARCHAR) AS v FROM '{current_app.config["PARQUET_PATH"]}'"
+
+        sql = f'SELECT DISTINCT CAST({column} AS VARCHAR) AS v FROM "{current_app.config["PARQUET_PATH"]}"'
         if clause:
             sql += f" WHERE {clause}"
         sql += " ORDER BY v"
 
         rows = datastore.run_query(sql, sql_params)
-        values = [str(r["v"]) for r in rows][:max_uniques]
+        values = [str(r["v"]) for r in rows]
+
+        if max_uniques:
+            values = values[:max_uniques]
+
         unique[column] = values
 
     return unique
+
 
 
 def get_base_date_bounds(datastore, date_col: str) -> Tuple[str, str]:
     """
     Get min and max dates directly from DuckDB.
     """
-    sql = f"""
-        SELECT
-            MIN(CAST({date_col} AS DATE)) AS dmin,
-            MAX(CAST({date_col} AS DATE)) AS dmax
-        FROM '{current_app.config["PARQUET_PATH"]}'
-    """
+    parquet_table = f'"{current_app.config["PARQUET_PATH"]}"'
+    sql = f'''
+    SELECT
+        MIN(CAST({date_col} AS DATE)) AS dmin,
+        MAX(CAST({date_col} AS DATE)) AS dmax
+    FROM {parquet_table}
+    '''
+
     rows = datastore.run_query(sql)
     if not rows:
         return "", ""

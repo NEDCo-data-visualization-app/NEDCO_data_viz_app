@@ -14,21 +14,21 @@ def download_csv():
     """Download filtered dataset as CSV, streamed directly from DuckDB."""
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
-
+    columns = datastore.get_columns()
     # Build FilterParams from request args (no DataFrame needed)
-    params = build_params(request.args, None)
+    params = build_params(request.args, base_columns=columns)
 
     clause, sql_params = params.to_sql_where(
         date_col=date_col,
         available_columns=None,  # allow any column
     )
 
-    sql = f"""
+    sql = f'''
         SELECT *
-        FROM '{current_app.config["PARQUET_PATH"]}'
+        FROM "{current_app.config["PARQUET_PATH"]}"
         WHERE {clause}
         ORDER BY {date_col}
-    """
+    '''
 
     def generate():
         """Stream CSV rows directly from DuckDB."""
