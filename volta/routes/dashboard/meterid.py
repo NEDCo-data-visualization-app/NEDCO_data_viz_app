@@ -1,7 +1,6 @@
-"""Meter ID options endpoint."""
+"""Meter ID options endpoint (Datastore-only, no pandas)."""
 
 from __future__ import annotations
-
 from typing import Dict, List
 
 from flask import current_app, jsonify, request
@@ -15,6 +14,7 @@ from volta.utils.filter_params import FilterParams
 def options_meterid():
     """Return distinct meter IDs respecting filters and search queries."""
     datastore = get_datastore()
+    date_col = current_app.config.get("DATE_COL", "od_date")
 
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
@@ -25,46 +25,39 @@ def options_meterid():
             limit = 200
         limit = max(limit, 1)
 
-        base = datastore.get(copy=False)
-        if base.empty or "meterid" not in base.columns:
-            return jsonify([])
-
         raw_selections = payload.get("selections") or {}
         selections: Dict[str, List[str]] = {}
 
-        cols_lc = {str(c).lower(): c for c in base.columns}
-        meterid_real = cols_lc.get("meterid", "meterid")
-
-        for in_key, values in raw_selections.items():
-            if not isinstance(values, (list, tuple)):
-                continue
-            real_col = cols_lc.get(str(in_key).lower())
-            if not real_col:
-                continue
-            if str(real_col).lower() == "meterid":
-                continue
-            cleaned = [str(v) for v in values if v not in (None, "")]
-            if cleaned:
-                selections[real_col] = cleaned
-
+        # Build FilterParams object
         params = FilterParams(
             start=_parse_date(str(payload.get("start_date") or "")),
             end=_parse_date(str(payload.get("end_date") or "")),
-            selections=selections,
+            selections=raw_selections,
         )
 
-        date_col = current_app.config["DATE_COL"]
-        filtered = params.apply(base, date_col)
-        if filtered.empty or meterid_real not in filtered.columns:
-            return jsonify([])
+        # Generate SQL WHERE clause from FilterParams
+        clause, sql_params = params.to_sql_where(
+            date_col=date_col,
+            available_columns=None  # allow filtering on any column
+        )
 
-        series = filtered[meterid_real].dropna().astype(str)
+        sql = f"""
+            SELECT DISTINCT CAST(meterid AS VARCHAR) AS v
+            FROM '{current_app.config["PARQUET_PATH"]}'
+            WHERE {clause}
+              AND meterid IS NOT NULL
+        """
         if q:
-            series = series[series.str.contains(q, case=False, na=False)]
+            sql += " AND CAST(meterid AS VARCHAR) ILIKE '%' || ? || '%'"
+            sql_params.append(q)
 
-        unique_values = sorted(set(series.tolist()))
-        return jsonify(unique_values[:limit])
+        sql += " ORDER BY v LIMIT ?"
+        sql_params.append(limit)
 
+        rows = datastore.run_query(sql, sql_params)
+        return jsonify([str(r["v"]) for r in rows])
+
+    # GET request
     q = (request.args.get("q") or "").strip()
     location_param = (request.args.get("utility") or "").strip()
     try:
@@ -73,12 +66,13 @@ def options_meterid():
         limit = 200
     limit = max(limit, 1)
 
-    sql = """
-        SELECT DISTINCT meterid AS v
-        FROM merged_sales_customers_clean
+    sql = f"""
+        SELECT DISTINCT CAST(meterid AS VARCHAR) AS v
+        FROM '{current_app.config["PARQUET_PATH"]}'
         WHERE meterid IS NOT NULL
     """
-    params = []
+    params: List[str] = []
+
     if location_param:
         sql += " AND CAST(utility AS VARCHAR) = ?"
         params.append(location_param)
@@ -90,4 +84,4 @@ def options_meterid():
     params.append(limit)
 
     rows = datastore.run_query(sql, params)
-    return jsonify(rows["v"].astype(str).tolist())
+    return jsonify([str(r["v"]) for r in rows])

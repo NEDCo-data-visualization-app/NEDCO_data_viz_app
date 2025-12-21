@@ -1,11 +1,9 @@
-"""Shared helper functions for dashboard routes."""
+"""Shared helper functions for dashboard routes (DuckDB + Parquet, no pandas)."""
 
 from __future__ import annotations
-
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
-import pandas as pd
 from flask import current_app
 
 from volta.utils.filter_params import FilterParams
@@ -14,31 +12,38 @@ DEFAULT_METERID_LIMIT = 500
 
 
 def _parse_date(value: str) -> Optional[date]:
+    """Parse a date string to a datetime.date, robust to empty or ISO formats."""
     if not value:
         return None
     try:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError:
-        parsed = pd.to_datetime(value, errors="coerce")
-        return parsed.date() if pd.notna(parsed) else None
+        try:
+            parsed = datetime.fromisoformat(value)
+            return parsed.date()
+        except ValueError:
+            return None
 
 
-def build_params(args, base_df: pd.DataFrame) -> FilterParams:
-    """Build ``FilterParams`` from request args with case-insensitive columns."""
+def build_params(args, base_columns: Optional[List[str]] = None) -> FilterParams:
+    """
+    Build FilterParams from request args, case-insensitive columns.
+    base_columns: list of column names (optional)
+    """
     selections: Dict[str, List[str]] = {}
-    exclude_cols = current_app.config["EXCLUDE_COLS"]
+    exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
+    cols_lc = {str(c).lower(): c for c in (base_columns or [])}
 
-    cols_lc = {str(c).lower(): c for c in base_df.columns}
+    # Parse selections from request args
+    if base_columns:
+        for column in base_columns:
+            if column in exclude_cols:
+                continue
+            values = args.getlist(column) or args.getlist(str(column).lower())
+            if values:
+                selections[column] = [str(v) for v in values]
 
-    for column in base_df.columns:
-        if column in exclude_cols:
-            continue
-        values = args.getlist(column)
-        if not values:
-            values = args.getlist(str(column).lower())
-        if values:
-            selections[column] = [str(v) for v in values]
-
+    # Include any additional keys in args that match known columns
     for key in args.keys():
         if key in selections:
             continue
@@ -63,38 +68,67 @@ def build_params(args, base_df: pd.DataFrame) -> FilterParams:
     )
 
 
-def build_unique_values(df: pd.DataFrame, max_uniques: int = 200) -> Dict[str, List[str]]:
+def build_unique_values(
+    datastore,
+    columns: List[str],
+    clause: str = "",
+    sql_params: Optional[List] = None,
+    max_uniques: int = 200,
+) -> Dict[str, List[str]]:
+    """
+    Build unique values for given columns by querying DuckDB.
+    """
     unique: Dict[str, List[str]] = {}
-    exclude_cols = current_app.config["EXCLUDE_COLS"]
-    for column in df.columns:
+    exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
+
+    for column in columns:
         if column in exclude_cols:
             continue
-        display_col = column
-        values = pd.Series(df[column].dropna().unique()).astype(str).tolist()
-        values = sorted(set(values))[:max_uniques]
-        unique[display_col] = values
+        sql = f"SELECT DISTINCT CAST({column} AS VARCHAR) AS v FROM '{current_app.config["PARQUET_PATH"]}'"
+        if clause:
+            sql += f" WHERE {clause}"
+        sql += " ORDER BY v"
+
+        rows = datastore.run_query(sql, sql_params)
+        values = [str(r["v"]) for r in rows][:max_uniques]
+        unique[column] = values
+
     return unique
 
 
-def get_base_date_bounds(df: pd.DataFrame) -> Tuple[str, str]:
-    date_col = current_app.config["DATE_COL"]
-    if date_col not in df.columns or len(df) == 0:
+def get_base_date_bounds(datastore, date_col: str) -> Tuple[str, str]:
+    """
+    Get min and max dates directly from DuckDB.
+    """
+    sql = f"""
+        SELECT
+            MIN(CAST({date_col} AS DATE)) AS dmin,
+            MAX(CAST({date_col} AS DATE)) AS dmax
+        FROM '{current_app.config["PARQUET_PATH"]}'
+    """
+    rows = datastore.run_query(sql)
+    if not rows:
         return "", ""
-    dmin = pd.to_datetime(df[date_col], errors="coerce").min()
-    dmax = pd.to_datetime(df[date_col], errors="coerce").max()
-    start = dmin.date().isoformat() if pd.notna(dmin) else ""
-    end = dmax.date().isoformat() if pd.notna(dmax) else ""
-    return start, end
+    dmin = rows[0]["dmin"].isoformat() if rows[0]["dmin"] else ""
+    dmax = rows[0]["dmax"].isoformat() if rows[0]["dmax"] else ""
+    return dmin, dmax
 
 
-def no_filters_selected(args, base_df: pd.DataFrame) -> bool:
-    exclude_cols = current_app.config["EXCLUDE_COLS"]
-    any_checkbox = any(
-        args.getlist(column) for column in base_df.columns if column not in exclude_cols
-    )
-    if any_checkbox:
-        return False
-    base_min, base_max = get_base_date_bounds(base_df)
+def no_filters_selected(args, datastore, columns: List[str], date_col: str) -> bool:
+    """
+    Determine if any filters are applied based on request args and DuckDB table.
+    """
+    exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
+
+    # Check for any selection filters in args
+    for col in columns:
+        if col in exclude_cols:
+            continue
+        if args.getlist(col) or args.getlist(col.lower()):
+            return False
+
+    # Check if date filters differ from base table bounds
+    base_min, base_max = get_base_date_bounds(datastore, date_col)
     start_in = args.get("start_date", "")
     end_in = args.get("end_date", "")
     if not start_in and not end_in:
@@ -106,7 +140,6 @@ def no_filters_selected(args, base_df: pd.DataFrame) -> bool:
 
 __all__ = [
     "DEFAULT_METERID_LIMIT",
-    "LEGACY_COLUMN_ALIASES",
     "_parse_date",
     "build_params",
     "build_unique_values",

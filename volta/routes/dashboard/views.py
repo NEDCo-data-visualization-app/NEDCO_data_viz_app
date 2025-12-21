@@ -1,8 +1,7 @@
-"""Dashboard index view."""
+"""Dashboard index view (fully datastore-based, preserving start/end values and preview logic)."""
 
 from __future__ import annotations
-
-import pandas as pd
+import logging
 from flask import (
     current_app,
     jsonify,
@@ -14,7 +13,7 @@ from flask import (
 )
 from markupsafe import escape
 from . import bp, get_datastore, get_metrics, get_predictor
-from .helpers import DEFAULT_METERID_LIMIT, build_params, build_unique_values, no_filters_selected
+from .helpers import DEFAULT_METERID_LIMIT, no_filters_selected
 
 PREDICT_ALL_AS_OF = "09-2020"
 PREVIEW_ROW_LIMIT = 10
@@ -39,94 +38,55 @@ COLUMN_CLASS_MAP = {
     "meterid": "text-nowrap text-center",
     "forecast_date": "text-nowrap",
     "horizon": "text-nowrap text-center",
-    "ocd_energy": "Energy (kWh)",
-    "ocd_cash_received": "Cash Received (GHC)",
+    "ocd_energy": "text-end",
+    "ocd_cash_received": "text-end",
     "ocd_paymoney": "text-nowrap text-end",
 }
 
 
 def _format_prediction_value(column: str, value: object) -> str:
+    """Format a prediction value for display."""
     if value is None:
         return "—"
-
     try:
-        if pd.isna(value):
-            return "—"
-    except TypeError:
-        pass
-
-    if column == "forecast_date":
-        parsed = pd.to_datetime(value, errors="coerce")
-        if pd.isna(parsed):
-            return str(escape(str(value)))
-        return parsed.date().isoformat()
-
-    if column == "horizon":
-        try:
-            return f"{int(float(value))}"
-        except (TypeError, ValueError):
-            return str(escape(str(value)))
-
-    if column in METRIC_COLUMNS:
-        try:
+        if column == "forecast_date":
+            return str(value)
+        elif column == "horizon":
+            return str(int(float(value)))
+        elif column in METRIC_COLUMNS:
             return f"{float(value):,.2f}"
-        except (TypeError, ValueError):
+        else:
             return str(escape(str(value)))
+    except Exception:
+        return str(escape(str(value)))
 
-    return str(escape(str(value)))
 
-
-def _render_prediction_preview_table(
-    df: pd.DataFrame, limit: int = PREVIEW_ROW_LIMIT
-) -> str:
-    if df is None or df.empty or limit <= 0:
+def _render_prediction_preview_table(rows: list[dict[str, object]], limit: int = PREVIEW_ROW_LIMIT) -> str:
+    """Render HTML table preview from list-of-dicts."""
+    if not rows or limit <= 0:
         return ""
 
+    rows = rows[:limit]
+    columns = list(rows[0].keys())
     metrics_service = get_metrics()
     column_labels = dict(COLUMN_LABEL_DEFAULTS)
 
     if metrics_service:
-        # ``Metrics`` exposes a ``mapping`` attribute for label lookups.  Fall back to
-        # treating the object as a mapping if an alternative implementation is
-        # supplied via configuration.
         service_mapping = getattr(metrics_service, "mapping", None)
         if isinstance(service_mapping, dict):
             column_labels.update(service_mapping)
-        else:
-            try:
-                column_labels.update(dict(metrics_service))  # type: ignore[arg-type]
-            except TypeError:
-                pass
 
-    priority_columns: list[str] = [
-        "meterid",
-        "forecast_date",
-        "horizon",
-        *METRIC_COLUMNS,
+    header_cells = [
+        f'<th scope="col" class="{COLUMN_CLASS_MAP.get(col, "text-nowrap")}">{escape(column_labels.get(col, col))}</th>'
+        for col in columns
     ]
-    columns: list[str] = [col for col in priority_columns if col in df.columns]
-    columns.extend(col for col in df.columns if col not in columns)
 
-    if not columns:
-        return ""
-
-    preview = df.loc[:, columns].head(limit)
-
-    header_cells: list[str] = []
-    for column in columns:
-        label = column_labels.get(column, column.replace("_", " ").title())
-        classes = COLUMN_CLASS_MAP.get(column, "text-nowrap")
-        header_cells.append(
-            f'<th scope="col" class="{classes}">{str(escape(str(label)))}</th>'
-        )
-
-    body_rows: list[str] = []
-    for row in preview.itertuples(index=False, name=None):
-        cells: list[str] = []
-        for column, value in zip(columns, row):
-            cell_classes = COLUMN_CLASS_MAP.get(column, "text-nowrap")
-            display_value = _format_prediction_value(column, value)
-            cells.append(f'<td class="{cell_classes}">{display_value}</td>')
+    body_rows = []
+    for row in rows:
+        cells = [
+            f'<td class="{COLUMN_CLASS_MAP.get(col, "text-nowrap")}">{_format_prediction_value(col, row.get(col))}</td>'
+            for col in columns
+        ]
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
 
     table_html = (
@@ -135,390 +95,127 @@ def _render_prediction_preview_table(
         f"<tbody>{''.join(body_rows)}</tbody>"
         "</table>"
     )
-
     return table_html
 
 
-def _normalize_month_end(as_of: str) -> pd.Timestamp | None:
-    """Return the month-end Timestamp for an ``as_of`` string."""
-
-    if not as_of:
-        return None
-
-    parsed = pd.to_datetime(as_of, format="%m-%Y", errors="coerce")
-    if pd.isna(parsed):
-        parsed = pd.to_datetime(as_of, errors="coerce")
-    if pd.isna(parsed):
-        return None
-    return (parsed + pd.offsets.MonthEnd(0)).normalize()
-
-
-def _serialize_monthly(df: pd.DataFrame, date_column: str) -> list[dict[str, object]]:
-    if df is None or df.empty or date_column not in df.columns:
-        return []
-
-    rows: list[dict[str, object]] = []
-    for _, row in df.iterrows():
-        month = pd.to_datetime(row.get(date_column), errors="coerce")
-        if pd.isna(month):
-            continue
-        item: dict[str, object] = {"month": month.date().isoformat()}
-        for metric in METRIC_COLUMNS:
-            value = row.get(metric)
-            if pd.isna(value):
-                item[metric] = None
-            elif value is None:
-                item[metric] = None
-            else:
-                try:
-                    item[metric] = float(value)
-                except (TypeError, ValueError):
-                    item[metric] = None
-        rows.append(item)
-    return rows
-
-def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Map internal metric column names to legacy API keys for predictions charts."""
-
-    converted: list[dict[str, object]] = []
-    for row in records:
-        item: dict[str, object] = {}
-        if "month" in row:
-            item["month"] = row["month"]
-        for legacy_key, new_key in LEGACY_PREDICTION_OUTPUT.items():
-            item[legacy_key] = row.get(new_key)
-        converted.append(item)
-    return converted
-
-def _prepare_predictions_df(predictions_df: pd.DataFrame | None) -> pd.DataFrame:
-    """Rename predictor outputs to the columns expected by the UI."""
-
-    if predictions_df is None:
-        return pd.DataFrame()
-
-    rename_map = {
-        "prediction_date": "forecast_date",
-        "paymoney_pred": "ocd_paymoney",
-        "energy_pred": "ocd_energy",
-        "cash_pred": "ocd_cash_received",
-    }
-
-    df = predictions_df.rename(columns=rename_map)
-
-    if "forecast_date" in df.columns:
-        df["forecast_date"] = pd.to_datetime(df["forecast_date"], errors="coerce")
-
-    return df
-
-
-def _extract_as_of(predictions_df: pd.DataFrame) -> str | None:
-    """Return the latest as_of date from the predictions frame if present."""
-
-    if "as_of" not in predictions_df.columns or predictions_df.empty:
-        return None
-
-    ts = pd.to_datetime(predictions_df["as_of"], errors="coerce")
-    ts = ts.dropna()
-    if ts.empty:
-        return None
-
-    return ts.max().date().isoformat()
-
-
-
-
-
-def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Map internal metric column names to legacy API keys for predictions charts."""
-
-    converted: list[dict[str, object]] = []
-    for row in records:
-        item: dict[str, object] = {}
-        if "month" in row:
-            item["month"] = row["month"]
-        for legacy_key, new_key in LEGACY_PREDICTION_OUTPUT.items():
-            item[legacy_key] = row.get(new_key)
-        converted.append(item)
-    return converted
-
-
-
-def _collect_historical_monthly(
-    as_of: str, *, meterid: str | None = None
-) -> list[dict[str, object]]:
+def _collect_historical_monthly(as_of: str, meterid: str | None = None) -> list[dict[str, object]]:
+    """Aggregate historical monthly metrics via datastore."""
     datastore = get_datastore()
     date_col = current_app.config.get("DATE_COL", "od_date")
-    cutoff = _normalize_month_end(as_of)
-
-    if cutoff is None:
-        return []
 
     clauses = [f"{date_col} IS NOT NULL", f"{date_col} <= ?"]
-    params: list[object] = [cutoff.to_pydatetime()]
+    params: list[object] = [as_of]
 
     if meterid:
-        clauses.append("meterid IS NOT NULL")
         clauses.append("CAST(meterid AS VARCHAR) = ?")
         params.append(str(meterid))
 
     where_sql = " AND ".join(clauses)
     sql = f"""
         SELECT
-            CAST(date_trunc('month', {date_col}) AS DATE) AS month,
-            SUM(ocd_energy)   AS ocd_energy,
-            SUM(ocd_cash_received)   AS ocd_cash_received,
+            CAST(date_trunc('month', {date_col}) AS TEXT) AS month,
+            SUM(ocd_energy) AS ocd_energy,
+            SUM(ocd_cash_received) AS ocd_cash_received,
             SUM(ocd_paymoney) AS ocd_paymoney
-        FROM merged_sales_customers_clean
+        FROM '{current_app.config["PARQUET_PATH"]}'
         WHERE {where_sql}
         GROUP BY 1
         ORDER BY 1
     """
-
     try:
-        monthly = datastore.run_query(sql, params)
-        return _serialize_monthly(monthly, "month")
+        rows = datastore.run_query(sql, params)
+        return rows
     except Exception:
-        current_app.logger.exception(
-            "Historical monthly aggregation failed; falling back to pandas"
-        )
-
-    base = datastore.get(copy=True)
-    if date_col not in base.columns:
+        current_app.logger.exception("Historical monthly aggregation failed")
         return []
 
-    frame = base.copy()
-    frame[date_col] = pd.to_datetime(frame[date_col], errors="coerce")
-    frame = frame.dropna(subset=[date_col])
 
-    if meterid:
-        meter_col = next(
-            (col for col in frame.columns if str(col).lower() == "meterid"),
-            None,
-        )
-        if meter_col:
-            frame = frame[frame[meter_col].astype(str) == str(meterid)]
-
-    if frame.empty:
+def _collect_forecast_monthly(predictions: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Aggregate forecast monthly metrics."""
+    if not predictions:
         return []
 
-    frame = frame[frame[date_col] <= cutoff]
-    metric_cols = [col for col in METRIC_COLUMNS if col in frame.columns]
-    if not metric_cols:
-        return []
-
-    monthly = (
-        frame.assign(month=frame[date_col].dt.to_period("M").dt.to_timestamp("M"))
-        .groupby("month", as_index=False)[metric_cols]
-        .sum(min_count=1)
-    )
-
-    return _serialize_monthly(monthly, "month")
-
-
-def _collect_forecast_monthly(predictions_df: pd.DataFrame) -> list[dict[str, object]]:
-    if predictions_df is None or predictions_df.empty:
-        return []
-
-    if "forecast_date" not in predictions_df.columns:
-        if "prediction_date" in predictions_df.columns:
-            predictions_df = predictions_df.rename(
-                columns={"prediction_date": "forecast_date"}
-            )
+    monthly_map: dict[str, dict[str, object]] = {}
+    for row in predictions:
+        month = row.get("forecast_date")
+        if month is None:
+            continue
+        metrics = {metric: row.get(metric) for metric in METRIC_COLUMNS}
+        if month not in monthly_map:
+            monthly_map[month] = {"month": month, **metrics}
         else:
-            return []
+            for metric, value in metrics.items():
+                monthly_map[month][metric] = (monthly_map[month].get(metric, 0) or 0) + (value or 0)
 
-    metrics = [col for col in METRIC_COLUMNS if col in predictions_df.columns]
-    if not metrics:
-        return []
-
-    monthly = (
-        predictions_df.copy()
-        .assign(forecast_date=pd.to_datetime(predictions_df["forecast_date"], errors="coerce"))
-        .dropna(subset=["forecast_date"])
-    )
-
-    if monthly.empty:
-        return []
-
-    monthly = (
-        monthly.assign(forecast_month=monthly["forecast_date"].dt.to_period("M").dt.to_timestamp("M"))
-        .groupby("forecast_month", as_index=False)[metrics]
-        .sum(min_count=1)
-    )
-
-    monthly = monthly.rename(columns={"forecast_month": "month"})
-    return _serialize_monthly(monthly, "month")
+    return list(monthly_map.values())
 
 
-def _get_meter_last_date(meterid: str) -> str | None:
-    if not meterid:
-        return None
-
-    datastore = get_datastore()
-    date_col = current_app.config.get("DATE_COL", "od_date")
-
-    try:
-        rows = datastore.run_query(
-            f"""
-            SELECT MAX({date_col}) AS last_date
-            FROM merged_sales_customers_clean
-            WHERE {date_col} IS NOT NULL
-              AND meterid IS NOT NULL
-              AND CAST(meterid AS VARCHAR) = ?
-            """,
-            [str(meterid)],
-        )
-        if not rows.empty:
-            value = rows.at[0, "last_date"] if "last_date" in rows.columns else None
-            ts = pd.to_datetime(value, errors="coerce")
-            if pd.notna(ts):
-                return ts.date().isoformat()
-    except Exception:
-        current_app.logger.exception("Unable to determine last date for meter via SQL")
-
-    base = datastore.get(copy=True)
-    if base.empty:
-        return None
-
-    date_series = None
-    meter_col = next((col for col in base.columns if str(col).lower() == "meterid"), None)
-    date_col_ref = next((col for col in base.columns if str(col).lower() == str(date_col).lower()), None)
-
-    if meter_col and date_col_ref:
-        try:
-            subset = base[base[meter_col].astype(str) == str(meterid)]
-            if subset.empty:
-                return None
-            date_series = pd.to_datetime(subset[date_col_ref], errors="coerce").dropna()
-        except Exception:
-            date_series = None
-
-    if date_series is not None and not date_series.empty:
-        last_date = date_series.max()
-        if pd.notna(last_date):
-            return last_date.date().isoformat()
-
-    return None
-
-def _get_dataset_last_date() -> str | None:
-    datastore = get_datastore()
-    date_col = current_app.config.get("DATE_COL", "od_date")
-
-    try:
-        rows = datastore.run_query(
-            f"""
-            SELECT MAX({date_col}) AS last_date
-            FROM merged_sales_customers_clean
-            WHERE {date_col} IS NOT NULL
-            """
-        )
-        if not rows.empty:
-            value = rows.at[0, "last_date"] if "last_date" in rows.columns else None
-            ts = pd.to_datetime(value, errors="coerce")
-            if pd.notna(ts):
-                return ts.date().isoformat()
-    except Exception:
-        current_app.logger.exception("Unable to determine last date for dataset via SQL")
-
-    base = datastore.get(copy=True)
-    if base.empty:
-        return None
-
-    date_col_ref = next(
-        (col for col in base.columns if str(col).lower() == str(date_col).lower()),
-        None,
-    )
-
-    if date_col_ref:
-        try:
-            date_series = pd.to_datetime(base[date_col_ref], errors="coerce").dropna()
-        except Exception:
-            date_series = pd.Series(dtype="datetime64[ns]")
-
-        if not date_series.empty:
-            last_date = date_series.max()
-            if pd.notna(last_date):
-                return last_date.date().isoformat()
-
-    return None
-
-
+def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Map internal metric column names to legacy API keys."""
+    converted = []
+    for row in records:
+        item = {"month": row.get("month")}
+        for legacy, internal in LEGACY_PREDICTION_OUTPUT.items():
+            item[legacy] = row.get(internal)
+        converted.append(item)
+    return converted
 
 
 def index():
-    date_col = (
-        current_app.config()["DATE_COL"] if callable(current_app.config) else current_app.config["DATE_COL"]
-    )
     datastore = get_datastore()
     metrics = get_metrics()
-    base = datastore.get(copy=True)
+    date_col = current_app.config.get("DATE_COL", "od_date")
 
-    if getattr(datastore, "_df", None) is None or base.empty:
-        return render_template("upload.html")
-
-    if request.args and no_filters_selected(request.args, base):
-        return redirect(url_for("dashboard.index"))
-
-    params = build_params(request.args, base)
-    after = params.apply(base, date_col)
-
-    unique_values = build_unique_values(after)
-
+    # Build unique meter & utility values
     meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
+    unique_values = {}
 
-    if "meterid" in base.columns:
-        try:
-            meterids = datastore.run_query(
-                f"""
-                SELECT DISTINCT meterid AS v
-                FROM merged_sales_customers_clean
-                WHERE meterid IS NOT NULL
-                ORDER BY v
-                LIMIT {int(meter_cap)};
-                """
-            )["v"].astype(str).tolist()
-            unique_values["meterid"] = meterids
-        except Exception:
-            pass
+    try:
+        meters = datastore.run_query(
+            f"SELECT DISTINCT meterid AS v FROM '{current_app.config["PARQUET_PATH"]}' WHERE meterid IS NOT NULL ORDER BY v LIMIT {meter_cap}"
+        )
+        unique_values["meterid"] = [str(r["v"]) for r in meters]
+    except Exception:
+        unique_values["meterid"] = []
 
-    if "utility" in base.columns:
-        try:
-            clause, sql_params = params.to_sql_where(
-                date_col=date_col,
-                available_columns=base.columns,
-            )
+    try:
+        utilities = datastore.run_query(
+            f"SELECT DISTINCT CAST(utility AS VARCHAR) AS v FROM '{current_app.config["PARQUET_PATH"]}' WHERE utility IS NOT NULL ORDER BY v"
+        )
+        unique_values["utility"] = [str(r["v"]) for r in utilities]
+    except Exception:
+        unique_values["utility"] = []
 
-            locs = datastore.run_query(
-                f"""
-                SELECT DISTINCT CAST(utility AS VARCHAR) AS v
-                FROM merged_sales_customers_clean
-                WHERE {clause} AND utility IS NOT NULL
-                ORDER BY v;
-                """,
-                sql_params,
-            )["v"].astype(str).tolist()
-            unique_values["utility"] = locs
-        except Exception:
-            pass
+    # Fetch preview rows
+    preview_rows = datastore.run_query(
+        f"SELECT * FROM '{current_app.config["PARQUET_PATH"]}' ORDER BY {date_col} DESC LIMIT {PREVIEW_ROW_LIMIT}"
+    )
 
+    # Determine start and end date values
     start_value = end_value = ""
-    if date_col in after.columns and len(after) > 0:
-        dmin = pd.to_datetime(after[date_col], errors="coerce").min()
-        dmax = pd.to_datetime(after[date_col], errors="coerce").max()
-        if pd.notna(dmin):
-            start_value = dmin.date().isoformat()
-        if pd.notna(dmax):
-            end_value = dmax.date().isoformat()
+    try:
+        result = datastore.run_query(
+            f"""
+            SELECT
+                MIN({date_col}) AS start_date,
+                MAX({date_col}) AS end_date
+            FROM '{current_app.config["PARQUET_PATH"]}'
+            WHERE {date_col} IS NOT NULL
+            """
+        )
+        if result:
+            start_value = result[0].get("start_date", "") or ""
+            end_value = result[0].get("end_date", "") or ""
+    except Exception:
+        current_app.logger.exception("Failed to fetch start/end dates from datastore")
 
-    stats = datastore.compute_stats(after)
-    summary = datastore.compute_summary(after)
+    stats = datastore.compute_stats(preview_rows)
+    summary = datastore.compute_summary(preview_rows)
 
-    chart_metrics = metrics.available(after)
+    chart_metrics = metrics.available(preview_rows)
     default_metric = chart_metrics[0][0] if chart_metrics else ""
 
-    preview_html = after.head(10).to_html(
-        classes="table table-sm table-striped table-hover", index=False
-    )
+    preview_html = _render_prediction_preview_table(preview_rows, PREVIEW_ROW_LIMIT)
 
     return render_template(
         "index.html",
@@ -529,42 +226,26 @@ def index():
         end_value=end_value,
         unique_values=unique_values,
         args=request.args,
-        total_rows=len(after),
-        total_cols=len(after.columns),
+        total_rows=len(preview_rows),
+        total_cols=len(preview_rows[0]) if preview_rows else 0,
         preview_html=preview_html,
         chart_metrics=chart_metrics,
         default_metric=default_metric,
     )
 
+
 def predictions():
     datastore = get_datastore()
-    base = datastore.get(copy=True)
-
     meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
     meter_options: list[str] = []
 
-    if getattr(datastore, "_df", None) is not None and not base.empty:
-        cols_lc = {str(col).lower(): col for col in base.columns}
-        meter_column = cols_lc.get("meterid")
-
-        if meter_column:
-            try:
-                rows = datastore.run_query(
-                    f"""
-                    SELECT DISTINCT meterid AS v
-                    FROM merged_sales_customers_clean
-                    WHERE meterid IS NOT NULL
-                    ORDER BY v
-                    LIMIT {int(meter_cap)};
-                    """
-                )
-                meter_options = rows["v"].astype(str).tolist()
-            except Exception:
-                try:
-                    series = base[meter_column].dropna().astype(str)
-                    meter_options = sorted(series.unique().tolist())[: int(meter_cap)]
-                except Exception:
-                    meter_options = []
+    try:
+        rows = datastore.run_query(
+            f"SELECT DISTINCT meterid AS v FROM '{current_app.config["PARQUET_PATH"]}' WHERE meterid IS NOT NULL ORDER BY v LIMIT {meter_cap}"
+        )
+        meter_options = [str(r["v"]) for r in rows]
+    except Exception:
+        meter_options = []
 
     return render_template(
         "predictions.html",
@@ -574,207 +255,156 @@ def predictions():
 
 
 def _run_predict_all():
+    datastore = get_datastore() 
     predictor = get_predictor()
-    return _prepare_predictions_df(predictor.predict_all_from_db())
-
+    return predictor.predict_all_from_db(datastore=datastore)
 
 
 def _run_predict_one(meterid: int):
+    datastore = get_datastore() 
     predictor = get_predictor()
-    return _prepare_predictions_df(
-        predictor.predict_one_meter_from_db(meterid=meterid)
-    )
+    return predictor.predict_one_meter_from_db(datastore=datastore, meterid=meterid)
 
 
 def predictions_predict_all():
     try:
-        predictions_df = _run_predict_all()
-    except Exception:  # pragma: no cover - defensive logging
+        predictions_list = _run_predict_all()
+    except Exception:
         current_app.logger.exception("Predict All request failed")
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": "Unable to generate predictions at this time.",
-                }
-            ),
-            500,
-        )
+        return jsonify({"ok": False, "error": "Unable to generate predictions at this time."}), 500
 
-    if predictions_df is None:
-        predictions_df = pd.DataFrame()
+    as_of = PREDICT_ALL_AS_OF
+    if hasattr(predictions_list, "to_dict"):
+        predictions_list = predictions_list.rename( 
+            columns={
+                "paymoney_pred": "ocd_paymoney",
+                "energy_pred": "ocd_energy",
+                "cash_pred": "ocd_cash_received",
+                "prediction_date": "forecast_date",
+            }
+    ).to_dict(orient="records")
+    forecast_monthly = _convert_to_legacy_metrics(_collect_forecast_monthly(predictions_list))
+    historical_monthly = _convert_to_legacy_metrics(_collect_historical_monthly(as_of))
 
-    as_of = _extract_as_of(predictions_df)
-    if not as_of:
-        as_of = _get_dataset_last_date()
+    row_count = len(predictions_list)
+    preview_html = _render_prediction_preview_table(predictions_list, min(PREVIEW_ROW_LIMIT, row_count))
 
-    forecast_monthly = _convert_to_legacy_metrics(
-        _collect_forecast_monthly(predictions_df)
-    )
-    historical_monthly: list[dict[str, object]] = []
-    if forecast_monthly:
-        historical_monthly = _convert_to_legacy_metrics(
-            _collect_historical_monthly(as_of)
-        )
+    return jsonify({
+        "ok": True,
+        "row_count": row_count,
+        "preview_rows": min(PREVIEW_ROW_LIMIT, row_count),
+        "preview_html": preview_html,
+        "as_of": as_of,
+        "scope": "all",
+        "charts": {
+            "historical": historical_monthly,
+            "forecast": forecast_monthly,
+        },
+    })
+def predictions_download():
+        meterid_raw = str(request.args.get("meterid", "")).strip()
+        datastore = get_datastore()
 
-    row_count = int(len(predictions_df))
-    preview_rows = min(PREVIEW_ROW_LIMIT, row_count)
-    preview_html = ""
+        if meterid_raw:
+            try:
+                meterid_int = int(meterid_raw)
+            except (TypeError, ValueError):
+                return make_response("Meter ID must be a valid number", 400)
 
-    if row_count:
-        preview_html = _render_prediction_preview_table(
-            predictions_df, preview_rows
-        )
+            # Use historical data as_of logic
+            as_of = PREDICT_ALL_AS_OF  # or implement a _get_meter_last_date equivalent
+            try:
+                predictions_list = _run_predict_one(meterid_int)
+                if hasattr(predictions_list, "to_dict"):
+                    predictions_list = predictions_list.to_dict(orient="records")
+            except Exception:
+                current_app.logger.exception("Predict meter download failed")
+                return make_response("Unable to generate predictions", 500)
 
-    return jsonify(
-        {
-            "ok": True,
-            "row_count": row_count,
-            "preview_rows": preview_rows,
-            "preview_html": preview_html,
-            "as_of": as_of,
-            "scope": "all",
-            "charts": {
-                "historical": historical_monthly,
-                "forecast": forecast_monthly,
-            },
-        }
-    )
+            filename = f"predict_meter_{meterid_raw}.csv"
 
+        else:
+            as_of = PREDICT_ALL_AS_OF
+            try:
+                predictions_list = _run_predict_all()
+                if hasattr(predictions_list, "to_dict"):
+                    predictions_list = predictions_list.to_dict(orient="records")
+            except Exception:
+                current_app.logger.exception("Predict All download failed")
+                return make_response("Unable to generate predictions", 500)
+
+            filename = "predict_all.csv"
+
+        # Convert internal metric names to legacy keys
+        if predictions_list:
+            for row in predictions_list:
+                for legacy, internal in LEGACY_PREDICTION_OUTPUT.items():
+                    row[legacy] = row.pop(internal, None)
+
+        # Convert to CSV
+        import csv
+        from io import StringIO
+
+        output = StringIO()
+        if predictions_list:
+            writer = csv.DictWriter(output, fieldnames=predictions_list[0].keys())
+            writer.writeheader()
+            writer.writerows(predictions_list)
+        csv_content = output.getvalue()
+        output.close()
+
+        response = make_response(csv_content)
+        response.headers["Content-Type"] = "text/csv"
+        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 def predictions_predict_one():
     payload = request.get_json(silent=True) or {}
     meterid_raw = str(payload.get("meterid", "")).strip()
-
     if not meterid_raw:
-        return (
-            jsonify({"ok": False, "error": "Select a meter before running Predict."}),
-            200,
-        )
+        return jsonify({"ok": False, "error": "Select a meter before running Predict."}), 200
 
     try:
         meterid_int = int(meterid_raw)
-    except (TypeError, ValueError):
-        return (
-            jsonify({"ok": False, "error": "Meter ID must be a valid number."}),
-            200,
-        )
+    except ValueError:
+        return jsonify({"ok": False, "error": "Meter ID must be a valid number."}), 200
 
-    as_of = _get_meter_last_date(meterid_raw)
-    if not as_of:
-        return (
-            jsonify({"ok": False, "error": "No historical data found for the selected meter."}),
-            200,
-        )
+    predictions_list = _run_predict_one(meterid_int)
+    as_of = PREDICT_ALL_AS_OF
 
-    try:
-        predictions_df = _run_predict_one(meterid_int)
-    except Exception:  # pragma: no cover - defensive logging
-        current_app.logger.exception("Predict meter request failed")
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": "Unable to generate predictions at this time.",
-                }
-            ),
-            200,
-        )
+    if hasattr(predictions_list, "to_dict"):
+        predictions_list = predictions_list.rename(
+            columns={
+                "paymoney_pred": "ocd_paymoney",
+                "energy_pred": "ocd_energy",
+                "cash_pred": "ocd_cash_received",
+                "prediction_date": "forecast_date",
+            }
+        ).to_dict(orient="records")
 
-    if predictions_df is None:
-        predictions_df = pd.DataFrame()
+    forecast_monthly = _convert_to_legacy_metrics(_collect_forecast_monthly(predictions_list))
+    historical_monthly = _convert_to_legacy_metrics(_collect_historical_monthly(as_of, meterid=meterid_raw))
 
-    inferred_as_of = _extract_as_of(predictions_df)
-    if inferred_as_of:
-        as_of = inferred_as_of
+    row_count = len(predictions_list)
+    preview_html = _render_prediction_preview_table(predictions_list, min(PREVIEW_ROW_LIMIT, row_count))
 
-
-    forecast_monthly = _convert_to_legacy_metrics(
-        _collect_forecast_monthly(predictions_df)
-    )
-    historical_monthly: list[dict[str, object]] = []
-    if forecast_monthly:
-        historical_monthly = _convert_to_legacy_metrics(
-            _collect_historical_monthly(as_of, meterid=meterid_raw)
-        )
-
-    row_count = int(len(predictions_df))
-    preview_rows = min(PREVIEW_ROW_LIMIT, row_count)
-    preview_html = ""
-
-    if row_count:
-        preview_html = _render_prediction_preview_table(
-            predictions_df, preview_rows
-        )
-
-    return jsonify(
-        {
-            "ok": True,
-            "row_count": row_count,
-            "preview_rows": preview_rows,
-            "preview_html": preview_html,
-            "as_of": as_of,
-            "meterid": meterid_raw,
-            "scope": "meter",
-            "charts": {
-                "historical": historical_monthly,
-                "forecast": forecast_monthly,
-            },
-        }
-    )
+    return jsonify({
+        "ok": True,
+        "row_count": row_count,
+        "preview_rows": min(PREVIEW_ROW_LIMIT, row_count),
+        "preview_html": preview_html,
+        "as_of": as_of,
+        "meterid": meterid_raw,
+        "scope": "meter",
+        "charts": {
+            "historical": historical_monthly,
+            "forecast": forecast_monthly,
+        },
+    })
 
 
-def predictions_download():
-    meterid_raw = str(request.args.get("meterid", "")).strip()
-
-    if meterid_raw:
-        try:
-            meterid_int = int(meterid_raw)
-        except (TypeError, ValueError):
-            return make_response("Meter ID must be a valid number", 400)
-
-        as_of = _get_meter_last_date(meterid_raw)
-        if not as_of:
-            return make_response("No historical data found for the selected meter", 404)
-
-        try:
-            predictions_df = _run_predict_one(meterid_int)
-        except Exception:  # pragma: no cover - defensive logging
-            current_app.logger.exception("Predict meter download failed")
-            return make_response("Unable to generate predictions", 500)
-
-        if predictions_df is None:
-            predictions_df = pd.DataFrame()
-
-        filename = f"predict_meter_{meterid_raw}.csv"
-    else:
-        as_of = PREDICT_ALL_AS_OF
-
-        try:
-            predictions_df = _run_predict_all()
-        except Exception:  # pragma: no cover - defensive logging
-            current_app.logger.exception("Predict All download failed")
-            return make_response("Unable to generate predictions", 500)
-
-        if predictions_df is None:
-            predictions_df = pd.DataFrame()
-
-        filename = "predict_all.csv"
-        
-
-    if not predictions_df.empty:
-        rename_map = {new: legacy for legacy, new in LEGACY_PREDICTION_OUTPUT.items()}
-        predictions_df = predictions_df.rename(columns=rename_map)
-
-    csv_content = predictions_df.to_csv(index=False)
-    response = make_response(csv_content)
-    response.headers["Content-Type"] = "text/csv"
-    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
-    return response
-
-
+bp.add_url_rule("/predictions/download", view_func=predictions_download, methods=["GET"])
 bp.add_url_rule("/predictions", view_func=predictions, methods=["GET"])
 bp.add_url_rule("/predictions/api/predict-all", view_func=predictions_predict_all, methods=["POST"])
 bp.add_url_rule("/predictions/api/predict", view_func=predictions_predict_one, methods=["POST"])
-bp.add_url_rule("/predictions/download", view_func=predictions_download, methods=["GET"])
 bp.add_url_rule("/", view_func=index, methods=["GET"])

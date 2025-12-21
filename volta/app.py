@@ -43,7 +43,7 @@ def create_app(
         app.config.from_object(config_object)
 
     metrics = Metrics(app.config["METRICS"])
-    datastore = DataStore(app.config, metrics)
+    datastore = DataStore(config=app.config,metrics=metrics)
 
     app.extensions["metrics"] = metrics
     app.extensions["datastore"] = datastore

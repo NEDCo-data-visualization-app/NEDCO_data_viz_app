@@ -1,24 +1,24 @@
-from flask import Blueprint, request, render_template, redirect, url_for, current_app, Response
-import os
+from flask import Blueprint, request, render_template, redirect, url_for, current_app
 from pathlib import Path
 from werkzeug.utils import secure_filename
 import logging
-import pandas as pd
+import csv
 
 upload_bp = Blueprint("upload", __name__, template_folder="../../templates")
-
-# Use the configured uploads location (default set in Config.CSV_GLOB = "data/uploads/*.csv")
-def _uploads_dir() -> Path:
-    glob_pat = current_app.config.get("CSV_GLOB", "data/uploads/*.csv")
-    # strip the trailing pattern to get the directory
-    p = Path(glob_pat)
-    return (p.parent if p.suffix else Path(glob_pat)).resolve()
 
 ALLOWED_EXTENSIONS = {"csv"}
 logger = logging.getLogger("volta.upload")
 
+
+def _uploads_dir() -> Path:
+    glob_pat = current_app.config.get("CSV_GLOB", "data/uploads/*.csv")
+    p = Path(glob_pat)
+    return (p.parent if p.suffix else Path(glob_pat)).resolve()
+
+
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 @upload_bp.route("/upload", methods=["GET", "POST"])
 def upload_file():
@@ -44,12 +44,19 @@ def upload_file():
             file.save(str(filepath))
             logger.info("Saved upload to %s", filepath)
 
-            df = pd.read_csv(filepath)
+            # Read CSV into list-of-dicts
+            with open(filepath, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                data_list = [dict(row) for row in reader]
+
+            # Load into datastore
             datastore = current_app.extensions["datastore"]
-            datastore.set_df(df) 
+            datastore.load_data(data_list)  # <-- your datastore should implement load_data()
+
             logger.info("Uploaded CSV loaded into DataStore successfully")
 
-            os.remove(filepath)
+            # Remove temporary file
+            filepath.unlink()
             logger.info("Temporary uploaded CSV removed from server")
             return redirect(url_for("dashboard.index"))
 
@@ -59,9 +66,9 @@ def upload_file():
 
     return render_template("upload.html")
 
+
 @upload_bp.route("/try_connection", methods=["POST"])
 def try_connection():
     datastore = current_app.extensions["datastore"]
-
     success = datastore.try_internet_connection()
     return redirect(url_for("dashboard.index"))

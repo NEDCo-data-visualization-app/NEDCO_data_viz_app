@@ -19,10 +19,8 @@ class Config:
     # Data paths
     # -------------------------
     # DuckDB database file (main store)
-    DUCKDB_PATH = Path(os.getenv("VOLTA_DUCKDB_PATH", "data/warehouse_new.duckdb"))
 
     # Location of incoming CSVs (from client uploads)
-    CSV_GLOB = os.getenv("VOLTA_CSV_GLOB", "data/*.csv")
 
     # -------------------------
     # Data schema
@@ -34,6 +32,7 @@ class Config:
     # -------------------------
     BUCKET_URL = os.getenv("BUCKET_URL")
     SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+    PARQUET_PATH = os.getenv("PARQUET_PATH")
 
     # -------------------------
     # UI filters

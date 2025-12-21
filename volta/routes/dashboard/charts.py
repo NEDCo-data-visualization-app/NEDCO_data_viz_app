@@ -1,59 +1,60 @@
-"""Chart data endpoints."""
+"""Chart data endpoints (DuckDB + Parquet, no pandas)."""
 
 from __future__ import annotations
 
-import pandas as pd
 from flask import current_app, jsonify, request
 
 from . import bp, get_datastore, get_metrics
 from .helpers import build_params
 
-
 @bp.route("/chart-data", methods=["GET"])
 def chart_data():
-    """Time-series for charts, computed in DuckDB (fast)."""
+    """Time-series for charts, computed fully in DuckDB."""
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
     metrics = get_metrics()
 
-    base = datastore.get(copy=False)
-    params = build_params(request.args, base)
+    # Build FilterParams from request args
+    params = build_params(request.args, None)
 
-    requested_metrics = (params.metric or "").split(",")
-    validated_metrics = [m for m in requested_metrics if metrics.validate(base, m)]
+    # --- Use cached columns for validation ---
+    columns = datastore.get_columns()
+    fake_row = dict.fromkeys(columns)  # single dict to represent a row
+    requested_metrics = [m for m in (params.metric or "").split(",") if m]
+    validated_metrics = [m for m in requested_metrics if metrics.validate([fake_row], m)]
 
     if not validated_metrics:
         return jsonify(
-            {"labels": [], "values": [], "metric_label": params.metric or "", "date_col": date_col}
+            {
+                "labels": [],
+                "values": {m: [] for m in requested_metrics},
+                "metric_labels": {m: metrics.label(m) for m in requested_metrics},
+                "date_col": date_col,
+            }
         )
 
     clause, sql_params = params.to_sql_where(
         date_col=date_col,
-        available_columns=base.columns,
+        available_columns=[date_col] + validated_metrics,
     )
 
     trunc_unit = params.trunc_unit()
-
     agg_func = request.args.get("agg", "mean").lower()
-    if agg_func in ("sum", "total"):
-        sql_agg = "SUM"
-    else:
-        sql_agg = "AVG"
+    sql_agg = "SUM" if agg_func in ("sum", "total") else "AVG"
 
-    metric_sql = ", ".join([f"{sql_agg}({m}) AS {m}" for m in validated_metrics])
+    metric_sql = ", ".join(f"{sql_agg}({m}) AS {m}" for m in validated_metrics)
+
     sql = f"""
         SELECT
-          date_trunc('{trunc_unit}', {date_col}) AS bucket,
-          {metric_sql}
-        FROM merged_sales_customers_clean
+            date_trunc('{trunc_unit}', {date_col}) AS bucket,
+            {metric_sql}
+        FROM '{current_app.config["PARQUET_PATH"]}'
         WHERE {clause}
         GROUP BY 1
-        ORDER BY 1;
+        ORDER BY 1
     """
-
-    df = datastore.run_query(sql, sql_params)
-
-    if df is None or df.empty:
+    rows = datastore.run_query(sql, sql_params)
+    if not rows:
         return jsonify(
             {
                 "labels": [],
@@ -63,21 +64,22 @@ def chart_data():
             }
         )
 
-    def _fmt(ts: pd.Timestamp) -> str:
-        if params.freq == "M":
-            return pd.to_datetime(ts).strftime("%Y-%m")
-        return pd.to_datetime(ts).date().isoformat()
+    # ---------- Format labels ----------
+    if params.freq == "M":
+        labels = [str(r["bucket"])[:7] for r in rows]  # YYYY-MM
+    else:
+        labels = [str(r["bucket"])[:10] for r in rows]  # YYYY-MM-DD
 
-    labels = [_fmt(v) for v in df["bucket"]]
-
-    values_dict = {}
-    for m in validated_metrics:
-        values_dict[m] = [float(v) if pd.notna(v) else 0.0 for v in df[m]]
+    # ---------- Build values ----------
+    values: dict[str, list[float]] = {
+        m: [float(r[m]) if r[m] is not None else 0.0 for r in rows]
+        for m in validated_metrics
+    }
 
     return jsonify(
         {
             "labels": labels,
-            "values": values_dict,
+            "values": values,
             "metric_labels": {m: metrics.label(m) for m in validated_metrics},
             "date_col": date_col,
         }

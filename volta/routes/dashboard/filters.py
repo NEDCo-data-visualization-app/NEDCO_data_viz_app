@@ -1,10 +1,8 @@
-"""Filter endpoints for dashboard."""
+"""Filter endpoints for dashboard (DuckDB + Parquet, no pandas)."""
 
 from __future__ import annotations
-
 from typing import Dict, List
 
-import pandas as pd
 from flask import current_app, jsonify, request
 
 from . import bp, get_datastore
@@ -15,19 +13,20 @@ from volta.utils.filter_params import FilterParams
 @bp.route("/filters/options", methods=["POST"])
 def filter_options():
     datastore = get_datastore()
-    base = datastore.get(copy=False)
-    if base.empty:
-        return jsonify({"options": {}, "dates": {"min": "", "max": ""}, "rows": 0})
 
     payload = request.get_json(silent=True) or {}
 
     exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
-    cols_lc = {
-        str(c).lower(): c
-        for c in base.columns
-        if c not in exclude_cols
-    }
 
+    # Use first row to determine columns
+    probe = datastore.run_query(f"SELECT * FROM '{current_app.config["PARQUET_PATH"]}' LIMIT 1")
+    if not probe:
+        return jsonify({"options": {}, "dates": {"min": "", "max": ""}, "rows": 0})
+
+    base_cols = list(probe[0].keys())
+    cols_lc = {str(c).lower(): c for c in base_cols if c not in exclude_cols}
+
+    # ---------- Parse selections ----------
     raw_selections = payload.get("selections") or {}
     selections: Dict[str, List[str]] = {}
     for in_key, values in raw_selections.items():
@@ -40,18 +39,20 @@ def filter_options():
         if cleaned:
             selections[real_col] = cleaned
 
+    # ---------- Determine facets ----------
     facets_in = payload.get("facets") or []
     resolved_facets: Dict[str, str] = {}
     if facets_in:
         for f in facets_in:
             real = cols_lc.get(str(f).lower())
-            if real and real in base.columns:
+            if real:
                 resolved_facets[str(f)] = real
     else:
         for candidate in ["utility", "tariff_type", "meterid"]:
-            if candidate in base.columns:
+            if candidate in base_cols:
                 resolved_facets[candidate] = candidate
 
+    # ---------- Build FilterParams ----------
     params = FilterParams(
         start=_parse_date(str(payload.get("start_date") or "")),
         end=_parse_date(str(payload.get("end_date") or "")),
@@ -61,21 +62,20 @@ def filter_options():
     )
 
     date_col = current_app.config["DATE_COL"]
-    clause, sql_params = params.to_sql_where(date_col=date_col, available_columns=base.columns)
+    clause, sql_params = params.to_sql_where(date_col=date_col, available_columns=base_cols)
 
+    # ---------- Helper to get distinct values ----------
     def distinct(col: str) -> List[str]:
-        df = datastore.run_query(
+        rows = datastore.run_query(
             f"""
             SELECT DISTINCT CAST({col} AS VARCHAR) AS v
-            FROM merged_sales_customers_clean
+            FROM '{current_app.config["PARQUET_PATH"]}'
             WHERE {clause} AND {col} IS NOT NULL
             ORDER BY v
             """,
             sql_params,
         )
-        if df is None or df.empty:
-            return []
-        return df["v"].astype(str).tolist()
+        return [str(r["v"]) for r in rows] if rows else []
 
     unique_values: Dict[str, List[str]] = {}
     for display_col, real_col in resolved_facets.items():
@@ -85,28 +85,26 @@ def filter_options():
     if "meterid" in unique_values:
         unique_values["meterid"] = unique_values["meterid"][: int(meter_cap)]
 
-    ddf = datastore.run_query(
+    # ---------- Min/max date ----------
+    date_rows = datastore.run_query(
         f"""
         SELECT
           MIN(CAST({date_col} AS DATE)) AS dmin,
           MAX(CAST({date_col} AS DATE)) AS dmax
-        FROM merged_sales_customers_clean
+        FROM '{current_app.config["PARQUET_PATH"]}'
         WHERE {clause}
         """,
         sql_params,
     )
-    date_min = (
-        ddf.iloc[0]["dmin"].isoformat() if ddf is not None and pd.notna(ddf.iloc[0]["dmin"]) else ""
-    )
-    date_max = (
-        ddf.iloc[0]["dmax"].isoformat() if ddf is not None and pd.notna(ddf.iloc[0]["dmax"]) else ""
-    )
+    date_min = date_rows[0]["dmin"].isoformat() if date_rows and date_rows[0]["dmin"] else ""
+    date_max = date_rows[0]["dmax"].isoformat() if date_rows and date_rows[0]["dmax"] else ""
 
-    cdf = datastore.run_query(
-        f"SELECT COUNT(*) AS n FROM merged_sales_customers_clean WHERE {clause};",
+    # ---------- Row count ----------
+    count_rows = datastore.run_query(
+        f"SELECT COUNT(*) AS n FROM '{current_app.config["PARQUET_PATH"]}' WHERE {clause};",
         sql_params,
     )
-    rows = int(cdf.iloc[0]["n"]) if cdf is not None else 0
+    rows = int(count_rows[0]["n"]) if count_rows else 0
 
     return jsonify(
         {

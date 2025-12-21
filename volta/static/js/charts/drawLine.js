@@ -1,7 +1,15 @@
-// Renders the main time-series line chart.
-// Accepts either:
-//  - { labels: [...], series: [{label, values, color?}, ...] }  // split-by format
-//  - { labels: [...], values: {metric: [...]}, metric_labels: {...} } // legacy
+// Chart rendering helpers for Volta dashboard
+// Works with both split-by series and legacy values format
+// Supports any number of metrics
+
+function generateColor(i) {
+  return `hsl(${i * 47 % 360}, 70%, 50%)`;
+}
+
+// Default colors for legacy two-metric charts
+const LEGACY_DEFAULT_COLORS = ['#36A2EB', '#FF6384', '#4BC0C0'];
+
+// ---------- Line chart (legacy + split-by) ----------
 export function drawLine(seriesDict, canvasEl) {
   if (!window.Chart || !canvasEl) return;
 
@@ -17,47 +25,33 @@ export function drawLine(seriesDict, canvasEl) {
 
   let datasets = [];
 
-  // New split-by format
+  // Split-by series format
   if (Array.isArray(seriesDict?.series)) {
-    datasets = seriesDict.series.map((s, i) => {
-      const color = s.color || `hsl(${i * 47}, 70%, 50%)`;
-      return {
-        label: s.label,
-        data: s.values,
-        borderColor: color,
-        backgroundColor: color,
-        yAxisID: 'y',
-        tension: 0.45,
-        fill: false,
-        pointRadius: 2
-      };
-    });
+    datasets = seriesDict.series.map((s, i) => ({
+      label: s.label,
+      data: s.values,
+      borderColor: s.color || generateColor(i),
+      backgroundColor: s.color || generateColor(i),
+      yAxisID: 'y',
+      tension: 0.45,
+      fill: false,
+      pointRadius: 2
+    }));
   }
 
-  // Legacy format (two metrics max)
+  // Legacy format (apply fixed default colors)
   if (!datasets.length && seriesDict?.values) {
     const metrics = Object.keys(seriesDict.values || {});
-    datasets = metrics.map((metric, i) => {
-      let color;
-      if (i===0){
-        color = '#36A2EB'
-      } else if (i === 1){
-        color ='#FF6384';
-      } else {
-       color = '#4BC0C0'
-      }
-      const yAxis = i === 0 ? 'y' : 'y1';
-      return {
-        label: seriesDict.metric_labels?.[metric] || metric,
-        data: seriesDict.values[metric],
-        borderColor: color,
-        backgroundColor: color,
-        yAxisID: yAxis,
-        tension: 0.45,
-        fill: false,
-        pointRadius: 2
-      };
-    });
+    datasets = metrics.map((metric, i) => ({
+      label: seriesDict.metric_labels?.[metric] || metric,
+      data: seriesDict.values[metric],
+      borderColor: LEGACY_DEFAULT_COLORS[i] || generateColor(i),
+      backgroundColor: LEGACY_DEFAULT_COLORS[i] || generateColor(i),
+      yAxisID: i === 0 ? 'y' : 'y1',
+      tension: 0.45,
+      fill: false,
+      pointRadius: 2
+    }));
   }
 
   const scales = {
@@ -68,10 +62,10 @@ export function drawLine(seriesDict, canvasEl) {
       ticks: { autoSkip: true, maxTicksLimit: 12 }
     },
     y: {
-        type: 'linear',
-        position: 'left',
-        title: { display: true, text: datasets[0]?.label || '' }
-      }
+      type: 'linear',
+      position: 'left',
+      title: { display: true, text: datasets[0]?.label || 'Value' }
+    }
   };
 
   // Only add right axis if legacy two-metric mode is used
@@ -80,7 +74,7 @@ export function drawLine(seriesDict, canvasEl) {
     scales.y1 = {
       type: 'linear',
       position: 'right',
-      title: { display: true, text: secondLabel === 'kWh' ? secondLabel : 'GHC' },
+      title: { display: true, text: secondLabel },
       grid: { drawOnChartArea: false }
     };
   }
@@ -100,6 +94,7 @@ export function drawLine(seriesDict, canvasEl) {
   });
 }
 
+// ---------- Line totals chart (totals per bucket) ----------
 export function drawLineTotals(seriesDict, canvasEl) {
   if (!window.Chart || !canvasEl) return;
 
@@ -115,42 +110,33 @@ export function drawLineTotals(seriesDict, canvasEl) {
 
   let datasets = [];
 
+  // Split-by series format
   if (Array.isArray(seriesDict?.series)) {
-    datasets = seriesDict.series.map((s, i) => {
-      const color = s.color || `hsl(${i * 47}, 70%, 50%)`;
-      return {
-        label: `${s.label}`,
-        data: s.values,
-        borderColor: color,
-        backgroundColor: color,
-        yAxisID: 'y',
-        tension: 0.45,
-        fill: false,
-        pointRadius: 2
-      };
-    });
+    datasets = seriesDict.series.map((s, i) => ({
+      label: s.label,
+      data: s.values,
+      borderColor: s.color || generateColor(i),
+      backgroundColor: s.color || generateColor(i),
+      yAxisID: 'y',
+      tension: 0.45,
+      fill: false,
+      pointRadius: 2
+    }));
   }
 
+  // Legacy format
   if (!datasets.length && seriesDict?.values) {
     const metrics = Object.keys(seriesDict.values || {});
-    datasets = metrics.map((metric, i) => {
-      let color;
-      if (i === 0) color = '#36A2EB';
-      else if (i === 1) color = '#FF6384';
-      else color = '#4BC0C0';
-
-      const yAxis = i === 0 ? 'y' : 'y1';
-      return {
-        label: (seriesDict.metric_labels?.[metric] || metric),
-        data: seriesDict.values[metric],
-        borderColor: color,
-        backgroundColor: color,
-        yAxisID: yAxis,
-        tension: 0.45,
-        fill: false,
-        pointRadius: 2
-      };
-    });
+    datasets = metrics.map((metric, i) => ({
+      label: seriesDict.metric_labels?.[metric] || metric,
+      data: seriesDict.values[metric],
+      borderColor: LEGACY_DEFAULT_COLORS[i] || generateColor(i),
+      backgroundColor: LEGACY_DEFAULT_COLORS[i] || generateColor(i),
+      yAxisID: i === 0 ? 'y' : 'y1',
+      tension: 0.45,
+      fill: false,
+      pointRadius: 2
+    }));
   }
 
   const scales = {
