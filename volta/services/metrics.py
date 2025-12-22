@@ -43,6 +43,6 @@ class Metrics:
         first_row = rows[0]
         return [(k, v) for k, v in self.mapping.items() if k in first_row]
 
-    def keys(self, rows: Sequence[Mapping[str, Any]]) -> List[str]:
+    def keys(self) -> List[str]:
         """Return just the available metric keys."""
-        return [k for k, _ in self.available(rows)]
+        return list(self.mapping.keys()) 

@@ -90,7 +90,7 @@ def build_unique_values(
             sql += f" WHERE {clause}"
         sql += " ORDER BY v"
 
-        rows = datastore.run_query(sql, sql_params)
+        rows = datastore.run_query(sql, sql_params, fetch_all=False)
         values = [str(r["v"]) for r in rows]
 
         if max_uniques:

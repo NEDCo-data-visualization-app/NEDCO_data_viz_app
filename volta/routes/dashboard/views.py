@@ -1,4 +1,4 @@
-"""Dashboard index view (fully datastore-based, preserving start/end values and preview logic)."""
+"""Dashboard index view (fully datastore-based, no pandas)."""
 
 from __future__ import annotations
 import logging
@@ -6,16 +6,15 @@ from flask import (
     current_app,
     jsonify,
     make_response,
-    redirect,
     render_template,
     request,
-    url_for,
 )
 from markupsafe import escape
 from . import bp, get_datastore, get_metrics, get_predictor
-from .helpers import DEFAULT_METERID_LIMIT, no_filters_selected, build_params, build_unique_values
+from .helpers import DEFAULT_METERID_LIMIT, build_params, build_unique_values
 from volta.utils.filter_params import FilterParams
-
+import tracemalloc
+tracemalloc.start()
 PREDICT_ALL_AS_OF = "09-2020"
 PREVIEW_ROW_LIMIT = 10
 METRIC_COLUMNS = ["ocd_energy", "ocd_cash_received", "ocd_paymoney"]
@@ -72,10 +71,8 @@ def _render_prediction_preview_table(rows: list[dict[str, object]], limit: int =
     metrics_service = get_metrics()
     column_labels = dict(COLUMN_LABEL_DEFAULTS)
 
-    if metrics_service:
-        service_mapping = getattr(metrics_service, "mapping", None)
-        if isinstance(service_mapping, dict):
-            column_labels.update(service_mapping)
+    if metrics_service and isinstance(getattr(metrics_service, "mapping", None), dict):
+        column_labels.update(metrics_service.mapping)
 
     header_cells = [
         f'<th scope="col" class="{COLUMN_CLASS_MAP.get(col, "text-nowrap")}">{escape(column_labels.get(col, col))}</th>'
@@ -124,8 +121,7 @@ def _collect_historical_monthly(as_of: str, meterid: str | None = None) -> list[
         ORDER BY 1
     '''
     try:
-        rows = datastore.run_query(sql, params)
-        return rows
+        return datastore.run_query(sql, params)
     except Exception:
         current_app.logger.exception("Historical monthly aggregation failed")
         return []
@@ -169,6 +165,7 @@ def index():
 
     # Step 1: get columns from DuckDB
     columns = datastore.get_columns()
+    print("Columns loaded", tracemalloc.get_traced_memory())
     if not columns:
         return render_template("upload.html")
 
@@ -176,40 +173,41 @@ def index():
     params = build_params(request.args, base_columns=columns)
 
     # Step 3: construct WHERE clause from FilterParams
-    if params.selections or params.start or params.end:
-        clause, sql_params = params.to_sql_where(date_col=date_col, available_columns=columns)
-    else:
-        clause = ""
-        sql_params = []
+    clause, sql_params = (
+        params.to_sql_where(date_col=date_col, available_columns=columns)
+        if (params.selections or params.start or params.end)
+        else ("", [])
+    )
 
-    # Step 4: fetch filtered rows from DuckDB
-    sql = f'SELECT * FROM "{current_app.config["PARQUET_PATH"]}"'
+    # Step 4: fetch preview rows only (memory-safe)
+    preview_rows_sql = f'SELECT * FROM "{current_app.config["PARQUET_PATH"]}"'
     if clause:
-        sql += f" WHERE {clause}"
-    filtered_rows = datastore.run_query(sql, sql_params)
+        preview_rows_sql += f" WHERE {clause}"
+    preview_rows_sql += f" LIMIT {PREVIEW_ROW_LIMIT}"
 
-    # Step 5: compute start/end dates
-    start_value = end_value = ""
-    if filtered_rows:
-        dates = [r[date_col] for r in filtered_rows if r.get(date_col)]
-        if dates:
-            start_value = min(dates)
-            end_value = max(dates)
+    preview_rows = datastore.run_query(preview_rows_sql, sql_params)
+    print("Preview rows loaded", tracemalloc.get_traced_memory())
 
-    # Step 6: build unique meter & utility values with limits
+    # Step 5: compute stats / summary in SQL (no memory load)
+    stats = datastore.compute_stats(where_clause=clause, sql_params=sql_params)
+    print("Stats computed", tracemalloc.get_traced_memory())
+    summary = datastore.compute_summary(where_clause=clause, sql_params=sql_params)
+    print("Summary computed", tracemalloc.get_traced_memory())
+
+    # Step 6: start / end date from summary
+    start_value = summary.get("date_min", "")
+    end_value = summary.get("date_max", "")
+
+    # Step 7: unique meter & utility values with limits
     meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
     unique_values = build_unique_values(datastore, ["meterid", "utility"], clause, sql_params, max_uniques=meter_cap)
 
-    # Step 7: compute stats and summary
-    stats = datastore.compute_stats(filtered_rows)
-    summary = datastore.compute_summary(filtered_rows)
-
-    # Step 8: chart metrics
-    chart_metrics = metrics.available(filtered_rows)
+    # Step 8: chart metrics (based on preview rows)
+    chart_metrics = metrics.available(preview_rows)
     default_metric = chart_metrics[0][0] if chart_metrics else ""
 
     # Step 9: render preview table
-    preview_html = _render_prediction_preview_table(filtered_rows, PREVIEW_ROW_LIMIT)
+    preview_html = _render_prediction_preview_table(preview_rows, PREVIEW_ROW_LIMIT)
 
     # Step 10: render template
     return render_template(
@@ -221,8 +219,8 @@ def index():
         end_value=end_value,
         unique_values=unique_values,
         args=request.args,
-        total_rows=len(filtered_rows),
-        total_cols=len(filtered_rows[0]) if filtered_rows else 0,
+        total_rows=summary.get("rows", 0),  
+        total_cols=len(columns),
         preview_html=preview_html,
         chart_metrics=chart_metrics,
         default_metric=default_metric,
@@ -232,15 +230,9 @@ def index():
 def predictions():
     datastore = get_datastore()
     meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
-    meter_options: list[str] = []
-
-    try:
-        rows = datastore.run_query(
-            f'SELECT DISTINCT meterid AS v FROM "{current_app.config["PARQUET_PATH"]}" WHERE meterid IS NOT NULL ORDER BY v LIMIT {meter_cap}'
-        )
-        meter_options = [str(r["v"]) for r in rows]
-    except Exception:
-        meter_options = []
+    sql = f'SELECT DISTINCT meterid AS v FROM "{current_app.config["PARQUET_PATH"]}" WHERE meterid IS NOT NULL ORDER BY v LIMIT {meter_cap}'
+    rows_gen = datastore.run_query(sql, fetch_all=False)
+    meter_options = [str(r["v"]) for r in rows_gen]
 
     return render_template(
         "predictions.html",
@@ -250,13 +242,13 @@ def predictions():
 
 
 def _run_predict_all():
-    datastore = get_datastore() 
+    datastore = get_datastore()
     predictor = get_predictor()
     return predictor.predict_all_from_db(datastore=datastore)
 
 
 def _run_predict_one(meterid: int):
-    datastore = get_datastore() 
+    datastore = get_datastore()
     predictor = get_predictor()
     return predictor.predict_one_meter_from_db(datastore=datastore, meterid=meterid)
 
@@ -270,14 +262,10 @@ def predictions_predict_all():
 
     as_of = PREDICT_ALL_AS_OF
     if hasattr(predictions_list, "to_dict"):
-        predictions_list = predictions_list.rename( 
-            columns={
-                "paymoney_pred": "ocd_paymoney",
-                "energy_pred": "ocd_energy",
-                "cash_pred": "ocd_cash_received",
-                "prediction_date": "forecast_date",
-            }
-    ).to_dict(orient="records")
+        predictions_list = [
+            {k: v for k, v in row.items()} for row in predictions_list.to_dict(orient="records")
+        ]
+
     forecast_monthly = _convert_to_legacy_metrics(_collect_forecast_monthly(predictions_list))
     historical_monthly = _convert_to_legacy_metrics(_collect_historical_monthly(as_of))
 
@@ -296,62 +284,7 @@ def predictions_predict_all():
             "forecast": forecast_monthly,
         },
     })
-def predictions_download():
-        meterid_raw = str(request.args.get("meterid", "")).strip()
-        datastore = get_datastore()
 
-        if meterid_raw:
-            try:
-                meterid_int = int(meterid_raw)
-            except (TypeError, ValueError):
-                return make_response("Meter ID must be a valid number", 400)
-
-            # Use historical data as_of logic
-            as_of = PREDICT_ALL_AS_OF  # or implement a _get_meter_last_date equivalent
-            try:
-                predictions_list = _run_predict_one(meterid_int)
-                if hasattr(predictions_list, "to_dict"):
-                    predictions_list = predictions_list.to_dict(orient="records")
-            except Exception:
-                current_app.logger.exception("Predict meter download failed")
-                return make_response("Unable to generate predictions", 500)
-
-            filename = f"predict_meter_{meterid_raw}.csv"
-
-        else:
-            as_of = PREDICT_ALL_AS_OF
-            try:
-                predictions_list = _run_predict_all()
-                if hasattr(predictions_list, "to_dict"):
-                    predictions_list = predictions_list.to_dict(orient="records")
-            except Exception:
-                current_app.logger.exception("Predict All download failed")
-                return make_response("Unable to generate predictions", 500)
-
-            filename = "predict_all.csv"
-
-        # Convert internal metric names to legacy keys
-        if predictions_list:
-            for row in predictions_list:
-                for legacy, internal in LEGACY_PREDICTION_OUTPUT.items():
-                    row[legacy] = row.pop(internal, None)
-
-        # Convert to CSV
-        import csv
-        from io import StringIO
-
-        output = StringIO()
-        if predictions_list:
-            writer = csv.DictWriter(output, fieldnames=predictions_list[0].keys())
-            writer.writeheader()
-            writer.writerows(predictions_list)
-        csv_content = output.getvalue()
-        output.close()
-
-        response = make_response(csv_content)
-        response.headers["Content-Type"] = "text/csv"
-        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return response
 
 def predictions_predict_one():
     payload = request.get_json(silent=True) or {}
@@ -368,14 +301,9 @@ def predictions_predict_one():
     as_of = PREDICT_ALL_AS_OF
 
     if hasattr(predictions_list, "to_dict"):
-        predictions_list = predictions_list.rename(
-            columns={
-                "paymoney_pred": "ocd_paymoney",
-                "energy_pred": "ocd_energy",
-                "cash_pred": "ocd_cash_received",
-                "prediction_date": "forecast_date",
-            }
-        ).to_dict(orient="records")
+        predictions_list = [
+            {k: v for k, v in row.items()} for row in predictions_list.to_dict(orient="records")
+        ]
 
     forecast_monthly = _convert_to_legacy_metrics(_collect_forecast_monthly(predictions_list))
     historical_monthly = _convert_to_legacy_metrics(_collect_historical_monthly(as_of, meterid=meterid_raw))
@@ -398,8 +326,52 @@ def predictions_predict_one():
     })
 
 
-bp.add_url_rule("/predictions/download", view_func=predictions_download, methods=["GET"])
+def predictions_download():
+    meterid_raw = str(request.args.get("meterid", "")).strip()
+    datastore = get_datastore()
+
+    if meterid_raw:
+        try:
+            meterid_int = int(meterid_raw)
+        except (TypeError, ValueError):
+            return make_response("Meter ID must be a valid number", 400)
+
+        as_of = PREDICT_ALL_AS_OF
+        predictions_list = _run_predict_one(meterid_int)
+        filename = f"predict_meter_{meterid_raw}.csv"
+
+    else:
+        as_of = PREDICT_ALL_AS_OF
+        predictions_list = _run_predict_all()
+        filename = "predict_all.csv"
+
+    # Convert internal metric names to legacy keys
+    if predictions_list:
+        for row in predictions_list:
+            for legacy, internal in LEGACY_PREDICTION_OUTPUT.items():
+                row[legacy] = row.pop(internal, None)
+
+    # Convert to CSV
+    import csv
+    from io import StringIO
+
+    output = StringIO()
+    if predictions_list:
+        writer = csv.DictWriter(output, fieldnames=predictions_list[0].keys())
+        writer.writeheader()
+        writer.writerows(predictions_list)
+    csv_content = output.getvalue()
+    output.close()
+
+    response = make_response(csv_content)
+    response.headers["Content-Type"] = "text/csv"
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+# Register routes
+bp.add_url_rule("/", view_func=index, methods=["GET"])
 bp.add_url_rule("/predictions", view_func=predictions, methods=["GET"])
+bp.add_url_rule("/predictions/download", view_func=predictions_download, methods=["GET"])
 bp.add_url_rule("/predictions/api/predict-all", view_func=predictions_predict_all, methods=["POST"])
 bp.add_url_rule("/predictions/api/predict", view_func=predictions_predict_one, methods=["POST"])
-bp.add_url_rule("/", view_func=index, methods=["GET"])

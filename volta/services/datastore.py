@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Mapping, Union
 import duckdb
+import pyarrow as pa
 from .metrics import Metrics
 from flask import current_app
 
@@ -9,40 +10,59 @@ logger = logging.getLogger("volta")
 
 
 class DataStore:
-    """DataStore that queries a Parquet file directly using a persistent DuckDB connection."""
+    """DataStore that queries a Parquet file directly using a persistent DuckDB connection.
+    Now supports streaming results to avoid large memory usage.
+    """
 
     def __init__(self, config: Mapping[str, Any], metrics: Metrics):
         self.config = config
         self.metrics = metrics
         self._columns: list[str] | None = None
-        self.parquet_path = self.config["PARQUET_PATH"]  # mandatory
+        self.parquet_path = self.config["PARQUET_PATH"]
         self._con = duckdb.connect(database=self.config["DB_PATH"], read_only=True)
-
         self.date_col = self.config.get("DATE_COL", "od_date")
 
     def get_columns(self) -> list[str]:
-        """Get column names from the table (cached)."""
+        """Cache columns instead of fetching every time."""
         if self._columns is None:
-            try:
-                sql = f'DESCRIBE "{self.parquet_path}"'
-                self._columns = [row[0] for row in self._con.execute(sql).fetchall()]
-            except Exception as e:
-                logger.error("Failed to fetch columns: %s", e)
-                self._columns = []
+            sql = f'SELECT * FROM "{self.parquet_path}" LIMIT 1'
+            row_gen = self.run_query(sql, fetch_all=False)  # returns generator
+            first_row = next(row_gen, None)  # get first row safely
+            self._columns = list(first_row.keys()) if first_row else []
         return self._columns
 
-    def run_query(self, sql: str, params=None) -> list[dict[str, Any]]:
-        """Execute SQL with persistent connection and return results as list-of-dicts."""
+
+
+    def run_query(self, sql: str, params=None, fetch_all=True):
+        """
+        Execute SQL and return results as:
+        - generator (if fetch_all=False)
+        - list of dicts (if fetch_all=True)
+        """
         try:
             cur = self._con.execute(sql, params or [])
             cols = [c[0] for c in cur.description]
-            rows = cur.fetchall()
-            return [dict(zip(cols, r)) for r in rows]
+
+            if fetch_all:
+                rows = cur.fetchall()
+                return [dict(zip(cols, r)) for r in rows]
+
+            # Memory-safe generator
+            def row_generator():
+                for r in cur.fetchall():
+                    yield dict(zip(cols, r))
+            return row_generator()
+
         except Exception as e:
             logger.error("DuckDB query failed: %s", e)
-            return []
+            if fetch_all:
+                return []
+            else:
+                return iter([])  # empty generator
 
-    # ---------- Timeseries & table ----------
+
+
+    # ---------- Example Timeseries & Table Queries ----------
 
     def timeseries_daily(self, date_from, date_to, country=None, category=None):
         sql = f"""
@@ -86,42 +106,90 @@ class DataStore:
         params = [date_from, date_to, country, country, limit, offset]
         return self.run_query(sql, params)
 
-    # ---------- Stats / summary ----------
+    # ---------- Stats / summary (SQL-based) ----------
 
-    def compute_stats(self, rows: list[dict[str, Any]]) -> Dict[str, Dict[str, Union[float, str]]]:
-        stats: Dict[str, Dict[str, Union[float, str]]] = {}
-        for key in self.metrics.keys(rows):
-            vals = [r[key] for r in rows if r.get(key) is not None]
-            if vals:
-                n = len(vals)
-                sorted_vals = sorted(vals)
-                median = sorted_vals[n // 2] if n % 2 == 1 else (sorted_vals[n // 2 - 1] + sorted_vals[n // 2]) / 2
-                stats[key] = {
-                    "label": self.metrics.label(key),
-                    "sum": float(sum(vals)),
-                    "mean": float(sum(vals) / n),
-                    "median": float(median),
-                    "min": float(min(vals)),
-                    "max": float(max(vals)),
+    def compute_stats(self, where_clause: str = "", sql_params: list = None) -> Dict[str, Dict[str, Union[float, str]]]:
+        """
+        Compute stats (sum, mean, min, max, median) directly in SQL for all metrics.
+        This avoids loading all rows into Python memory.
+        """
+        metrics = self.metrics.keys() 
+        if not metrics:
+            return {}
+
+        sql_parts = []
+        for metric in metrics:
+            # SUM, AVG, MIN, MAX
+            sql_parts.append(f"""
+                SUM({metric}) AS sum_{metric},
+                AVG({metric}) AS avg_{metric},
+                MIN({metric}) AS min_{metric},
+                MAX({metric}) AS max_{metric},
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {metric}) AS median_{metric}
+            """)
+
+        sql = f'SELECT {", ".join(sql_parts)} FROM "{self.parquet_path}"'
+        if where_clause:
+            sql += f" WHERE {where_clause}"
+
+        try:
+            result = self.run_query(sql, sql_params or [], fetch_all=True)
+            if not result:
+                return {}
+
+            row = result[0]
+            stats: Dict[str, Dict[str, Union[float, str]]] = {}
+            for metric in metrics:
+                stats[metric] = {
+                    "label": self.metrics.label(metric),
+                    "sum": float(row.get(f"sum_{metric}") or 0),
+                    "mean": float(row.get(f"avg_{metric}") or 0),
+                    "median": float(row.get(f"median_{metric}") or 0),
+                    "min": float(row.get(f"min_{metric}") or 0),
+                    "max": float(row.get(f"max_{metric}") or 0),
                 }
-        return stats
+            return stats
+        except Exception as e:
+            logger.exception("Failed to compute stats in SQL: %s", e)
+            return {}
 
-    def compute_summary(self, rows: list[dict[str, Any]]) -> Dict[str, Union[int, str, None]]:
-        out: Dict[str, Union[int, str, None]] = {
-            "rows": len(rows),
-            "cols": len(rows[0]) if rows else 0,
-            "meters": len({r["meterid"] for r in rows if "meterid" in r}) if rows else 0,
-            "locations": len({r["utility"] for r in rows if "utility" in r}) if rows else 0,
-            "date_min": "",
-            "date_max": "",
-        }
-        if rows and self.date_col:
-            dates = [r[self.date_col] for r in rows if r.get(self.date_col)]
-            if dates:
-                sorted_dates = sorted(dates)
-                out["date_min"] = str(sorted_dates[0])
-                out["date_max"] = str(sorted_dates[-1])
-        return out
+
+    def compute_summary(self, where_clause: str = "", sql_params: list = None) -> Dict[str, Union[int, str, None]]:
+        """
+        Compute summary (row count, distinct meters/locations, min/max date) in SQL.
+        """
+        date_col = self.date_col
+        sql = f'''
+            SELECT
+                COUNT(*) AS n_rows,
+                COUNT(DISTINCT meterid) AS meters,
+                COUNT(DISTINCT utility) AS locations,
+                MIN({date_col}) AS date_min,
+                MAX({date_col}) AS date_max
+            FROM "{self.parquet_path}"
+        '''
+        if where_clause:
+            sql += f" WHERE {where_clause}"
+
+        try:
+            result = self.run_query(sql, sql_params or [], fetch_all=True)
+            if not result:
+                return {"rows": 0, "cols": 0, "meters": 0, "locations": 0, "date_min": "", "date_max": ""}
+
+            row = result[0]
+            # cols can still be fetched from get_columns()
+            return {
+                "rows": int(row.get("n_rows") or 0),
+                "cols": len(self.get_columns()),
+                "meters": int(row.get("meters") or 0),
+                "locations": int(row.get("locations") or 0),
+                "date_min": str(row.get("date_min") or ""),
+                "date_max": str(row.get("date_max") or ""),
+            }
+        except Exception as e:
+            logger.exception("Failed to compute summary in SQL: %s", e)
+            return {"rows": 0, "cols": 0, "meters": 0, "locations": 0, "date_min": "", "date_max": ""}
+
 
 
 __all__ = ["DataStore"]

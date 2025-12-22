@@ -1,13 +1,8 @@
-"""Download endpoints for dashboard (DuckDB + Parquet, no pandas)."""
-
 from __future__ import annotations
-
 from datetime import datetime
 from flask import Response, current_app, request
-
 from . import bp, get_datastore
 from .helpers import build_params
-
 
 @bp.route("/download-csv", methods=["GET"])
 def download_csv():
@@ -15,7 +10,8 @@ def download_csv():
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
     columns = datastore.get_columns()
-    # Build FilterParams from request args (no DataFrame needed)
+
+    # Build FilterParams from request args
     params = build_params(request.args, base_columns=columns)
 
     clause, sql_params = params.to_sql_where(
@@ -26,26 +22,32 @@ def download_csv():
     sql = f'''
         SELECT *
         FROM "{current_app.config["PARQUET_PATH"]}"
-        WHERE {clause}
-        ORDER BY {date_col}
     '''
+    if clause:
+        sql += f" WHERE {clause}"
+    sql += f" ORDER BY {date_col}"
 
     def generate():
-        """Stream CSV rows directly from DuckDB."""
-        con = datastore._connect()
+        """Stream CSV rows directly from DuckDB using generator."""
         try:
-            cur = con.execute(sql, sql_params)
+            rows = datastore.run_query(sql, sql_params, fetch_all=False)  # generator
 
             # Header
-            cols = [c[0] for c in cur.description]
+            first_row = next(rows, None)
+            if not first_row:
+                return  # nothing to yield
+            cols = list(first_row.keys())
             yield ",".join(cols) + "\n"
 
-            # Rows
-            for row in cur.fetchall():
-                # Convert each value to string, empty string for None
-                yield ",".join("" if v is None else str(v) for v in row) + "\n"
-        finally:
-            con.close()
+            # First row
+            yield ",".join("" if v is None else str(v) for v in first_row.values()) + "\n"
+
+            # Remaining rows
+            for row in rows:
+                yield ",".join("" if v is None else str(v) for v in row.values()) + "\n"
+        except Exception as e:
+            # Optional: log error here
+            pass
 
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     filename = f"export_{ts}.csv"
