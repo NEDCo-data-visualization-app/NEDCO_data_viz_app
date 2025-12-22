@@ -72,31 +72,42 @@ def pie_data():
         "segment": segment_alias,
     })
 
-
 @bp.route("/bar-data", methods=["GET"])
 def bar_data():
     datastore = get_datastore()
     metrics = get_metrics()
     columns = datastore.get_columns()
     params = build_params(request.args, base_columns=columns)
-    metric = params.metric
 
-    fake_row = dict.fromkeys(columns)
-    if not metrics.validate([fake_row], metric):
-        return jsonify({"labels": [], "values": [], "metric_label": metrics.label(metric), "segment": "utility"})
+    # Get all requested metrics from query string (comma-separated)
+    metric_list = [m for m in request.args.get("metric", "").split(",") if m]
+    if not metric_list:
+        return jsonify([])
 
     segment_col = "utility"
-    sql, sql_params = _aggregate_sql(segment_col, metric, params, top_n=None)
-    rows = datastore.run_query(sql, sql_params, fetch_all=False)  # streaming
+    series_list = []
 
-    labels, values = [], []
-    for r in rows:
-        labels.append(r["label"])
-        values.append(float(r["value"]))
+    for metric in metric_list:
+        # Validate metric
+        fake_row = dict.fromkeys(columns)
+        if not metrics.validate([fake_row], metric):
+            continue
 
-    return jsonify({
-        "labels": labels,
-        "values": values,
-        "metric_label": metrics.label(metric),
-        "segment": segment_col,
-    })
+        # Aggregate SQL
+        sql, sql_params = _aggregate_sql(segment_col, metric, params, top_n=None)
+        rows = datastore.run_query(sql, sql_params, fetch_all=False)  # streaming
+
+        labels, values = [], []
+        for r in rows:
+            labels.append(r["label"])
+            values.append(float(r["value"]))
+
+        if labels and values:
+            series_list.append({
+                "labels": labels,
+                "values": values,
+                "metric_label": metrics.label(metric),
+                "segment": segment_col
+            })
+
+    return jsonify(series_list)

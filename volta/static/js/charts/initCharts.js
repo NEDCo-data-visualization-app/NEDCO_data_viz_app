@@ -118,11 +118,11 @@ export function initCharts() {
 
     // Bar chart
     if (barEl && metrics.length) {
-      const barSeriesList = await Promise.all(
-        metrics.map(metric => fetchJson(urlWithFilters('/bar-data', { metric })))
-      );
-      drawBar(barSeriesList.filter(Boolean), barEl);
-    }
+    const barSeriesList = await fetchJson(
+      urlWithFilters('/bar-data', { metric: metrics.join(',') })
+    );
+    drawBar(barSeriesList, barEl); 
+  }
   }, 100);
 
   checkboxes.forEach(cb => cb.addEventListener('change', refresh));
