@@ -19,7 +19,7 @@ class DataStore:
         self.metrics = metrics
         self._columns: list[str] | None = None
         self.parquet_path = self.config["PARQUET_PATH"]
-        self._con = duckdb.connect(database=self.config["DB_PATH"], read_only=True)
+        self._con = duckdb.connect(database=self.config["DB_PATH"], read_only=False)
         self.date_col = self.config.get("DATE_COL", "od_date")
 
     def get_columns(self) -> list[str]:
@@ -189,7 +189,6 @@ class DataStore:
         except Exception as e:
             logger.exception("Failed to compute summary in SQL: %s", e)
             return {"rows": 0, "cols": 0, "meters": 0, "locations": 0, "date_min": "", "date_max": ""}
-
 
 
 __all__ = ["DataStore"]

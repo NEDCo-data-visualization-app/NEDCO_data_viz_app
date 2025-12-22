@@ -1,7 +1,6 @@
 """Dashboard index view (fully datastore-based, no pandas)."""
 
 from __future__ import annotations
-import logging
 from flask import (
     current_app,
     jsonify,
@@ -12,8 +11,10 @@ from flask import (
 from markupsafe import escape
 from . import bp, get_datastore, get_metrics, get_predictor
 from .helpers import DEFAULT_METERID_LIMIT, build_params, build_unique_values
-from volta.utils.filter_params import FilterParams
 import tracemalloc
+import json
+import datetime
+from werkzeug.datastructures import ImmutableMultiDict
 tracemalloc.start()
 PREDICT_ALL_AS_OF = "09-2020"
 PREVIEW_ROW_LIMIT = 10
@@ -43,7 +44,59 @@ COLUMN_CLASS_MAP = {
     "ocd_paymoney": "text-nowrap text-end",
 }
 
+def cache_dashboard_first_load(datastore, preview_rows, stats, summary, unique_values, chart_metrics, preview_html):
+    # Convert all date objects to strings in preview_rows
+    def convert_dates(obj):
+        if isinstance(obj, list):
+            return [convert_dates(item) for item in obj]
+        elif isinstance(obj, dict):
+            return {k: convert_dates(v) for k, v in obj.items()}
+        elif isinstance(obj, (datetime.date, datetime.datetime)):
+            return str(obj)
+        else:
+            return obj
 
+    preview_rows_json = json.dumps(convert_dates(preview_rows))
+    stats_json = json.dumps(convert_dates(stats))
+    summary_json = json.dumps(convert_dates(summary))
+    unique_values_json = json.dumps(convert_dates(unique_values))
+    chart_metrics_json = json.dumps(chart_metrics)
+
+    datastore._con.execute("""
+        CREATE TABLE IF NOT EXISTS dashboard_cache (
+            cache_key VARCHAR PRIMARY KEY,
+            preview_rows   JSON,
+            stats          JSON,
+            summary        JSON,
+            unique_values  JSON,
+            chart_metrics  JSON,
+            preview_html   VARCHAR
+        );
+    """)
+
+    datastore._con.execute("""
+        INSERT INTO dashboard_cache (cache_key, preview_rows, stats, summary, unique_values, chart_metrics, preview_html)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(cache_key) DO UPDATE SET
+            preview_rows = excluded.preview_rows,
+            stats = excluded.stats,
+            summary = excluded.summary,
+            unique_values = excluded.unique_values,
+            chart_metrics = excluded.chart_metrics,
+            preview_html = excluded.preview_html
+    """, [
+        "full_load",
+        preview_rows_json,
+        stats_json,
+        summary_json,
+        unique_values_json,
+        chart_metrics_json,
+        preview_html
+    ])
+
+
+
+    
 def _format_prediction_value(column: str, value: object) -> str:
     """Format a prediction value for display."""
     if value is None:
@@ -157,8 +210,10 @@ def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[st
         converted.append(item)
     return converted
 
-
-def index():
+def index(first_load_override: bool | None = None):
+    """
+    Dashboard index view. If first_load_override=True, treat as first load (ignore request.args).
+    """
     datastore = get_datastore()
     metrics = get_metrics()
     date_col = current_app.config.get("DATE_COL", "od_date")
@@ -169,8 +224,9 @@ def index():
     if not columns:
         return render_template("upload.html")
 
-    # Step 2: build FilterParams from request.args
-    params = build_params(request.args, base_columns=columns)
+    # Step 2: build FilterParams from request.args or override
+    args_to_use = ImmutableMultiDict() if first_load_override else request.args
+    params = build_params(args_to_use, base_columns=columns)
 
     # Step 3: construct WHERE clause from FilterParams
     clause, sql_params = (
@@ -179,7 +235,66 @@ def index():
         else ("", [])
     )
 
-    # Step 4: fetch preview rows only (memory-safe)
+    # Step 4: determine if this is the "first load"
+    first_load = first_load_override if first_load_override is not None else not request.args
+
+    preview_rows = []
+    stats = {}
+    summary = {}
+    unique_values = {}
+    chart_metrics = []
+    preview_html = ""
+    row = None
+
+    # --- Step 4a: ensure cache table exists ---
+    datastore._con.execute("""
+        CREATE TABLE IF NOT EXISTS dashboard_cache (
+            cache_key VARCHAR PRIMARY KEY,
+            preview_rows   JSON,
+            stats          JSON,
+            summary        JSON,
+            unique_values  JSON,
+            chart_metrics  JSON,
+            preview_html   VARCHAR
+        );
+    """)
+
+    # --- Step 4b: if first load, try loading cache ---
+    if first_load:
+        row = datastore._con.execute(
+            "SELECT * FROM dashboard_cache WHERE cache_key='full_load'"
+        ).fetchone()
+
+        if row:
+            preview_rows = json.loads(row[1])
+            stats = json.loads(row[2])
+            summary = json.loads(row[3])
+            unique_values = json.loads(row[4])
+            chart_metrics = json.loads(row[5])
+            preview_html = row[6]
+
+            start_value = summary.get("date_min", "")
+            end_value = summary.get("date_max", "")
+            default_metric = chart_metrics[0][0] if chart_metrics else ""
+
+            print("Loaded dashboard from cache", tracemalloc.get_traced_memory())
+            return render_template(
+                "index.html",
+                date_col=date_col,
+                stats=stats,
+                summary=summary,
+                start_value=start_value,
+                end_value=end_value,
+                unique_values=unique_values,
+                args=args_to_use,
+                total_rows=summary.get("rows", 0),
+                total_cols=len(columns),
+                preview_html=preview_html,
+                chart_metrics=chart_metrics,
+                default_metric=default_metric,
+            )
+
+    # --- Step 5: fetch preview rows only ---
     preview_rows_sql = f'SELECT * FROM "{current_app.config["PARQUET_PATH"]}"'
     if clause:
         preview_rows_sql += f" WHERE {clause}"
@@ -188,28 +303,42 @@ def index():
     preview_rows = datastore.run_query(preview_rows_sql, sql_params)
     print("Preview rows loaded", tracemalloc.get_traced_memory())
 
-    # Step 5: compute stats / summary in SQL (no memory load)
+    # --- Step 6: compute stats / summary ---
     stats = datastore.compute_stats(where_clause=clause, sql_params=sql_params)
-    print("Stats computed", tracemalloc.get_traced_memory())
     summary = datastore.compute_summary(where_clause=clause, sql_params=sql_params)
-    print("Summary computed", tracemalloc.get_traced_memory())
+    print("Stats and summary computed", tracemalloc.get_traced_memory())
 
-    # Step 6: start / end date from summary
+    # Step 7: start / end date from summary
     start_value = summary.get("date_min", "")
     end_value = summary.get("date_max", "")
 
-    # Step 7: unique meter & utility values with limits
+    # Step 8: unique meter & utility values with limits
     meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
-    unique_values = build_unique_values(datastore, ["meterid", "utility"], clause, sql_params, max_uniques=meter_cap)
+    unique_values = build_unique_values(
+        datastore, ["meterid", "utility"], clause, sql_params, max_uniques=meter_cap
+    )
 
-    # Step 8: chart metrics (based on preview rows)
+    # Step 9: chart metrics (based on preview rows)
     chart_metrics = metrics.available(preview_rows)
     default_metric = chart_metrics[0][0] if chart_metrics else ""
 
-    # Step 9: render preview table
+    # Step 10: render preview table
     preview_html = _render_prediction_preview_table(preview_rows, PREVIEW_ROW_LIMIT)
 
-    # Step 10: render template
+    # Step 11: cache first-load results if not already cached
+    if first_load and not row:
+        cache_dashboard_first_load(
+            datastore,
+            preview_rows,
+            stats,
+            summary,
+            unique_values,
+            chart_metrics,
+            preview_html
+        )
+        print("Dashboard first-load cached", tracemalloc.get_traced_memory())
+
+    # Step 12: render template
     return render_template(
         "index.html",
         date_col=date_col,
@@ -218,14 +347,13 @@ def index():
         start_value=start_value,
         end_value=end_value,
         unique_values=unique_values,
-        args=request.args,
-        total_rows=summary.get("rows", 0),  
+        args=args_to_use,
+        total_rows=summary.get("rows", 0),
         total_cols=len(columns),
         preview_html=preview_html,
         chart_metrics=chart_metrics,
         default_metric=default_metric,
     )
-
 
 def predictions():
     datastore = get_datastore()
@@ -371,7 +499,14 @@ def predictions_download():
 
 # Register routes
 bp.add_url_rule("/", view_func=index, methods=["GET"])
+bp.add_url_rule(
+    "/reset-dashboard",
+    view_func=lambda: index(first_load_override=True),
+    methods=["POST"],
+    endpoint="reset_dashboard"
+)
 bp.add_url_rule("/predictions", view_func=predictions, methods=["GET"])
 bp.add_url_rule("/predictions/download", view_func=predictions_download, methods=["GET"])
 bp.add_url_rule("/predictions/api/predict-all", view_func=predictions_predict_all, methods=["POST"])
 bp.add_url_rule("/predictions/api/predict", view_func=predictions_predict_one, methods=["POST"])
+
