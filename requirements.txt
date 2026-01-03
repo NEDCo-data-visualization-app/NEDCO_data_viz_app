@@ -11,3 +11,7 @@ matplotlib
 langchain-community
 openpyxl
 xlrd
+joblib
+numpy
+lightgbm
+scikit-learn
