@@ -20,9 +20,18 @@ class Config:
     # -------------------------
     # DuckDB database file (main store)
     DUCKDB_PATH = Path(os.getenv("VOLTA_DUCKDB_PATH", "data/warehouse_new.duckdb"))
+    # Directory containing individual LightGBM model files
+    PREDICTOR_MODEL_DIR = Path(os.getenv("PREDICTOR_MODEL_DIR", "models"))
+
+    # Source table for raw monthly data used by the predictor
+    PREDICTOR_RAW_TABLE = os.getenv(
+        "PREDICTOR_RAW_TABLE", "merged_sales_customers_clean"
+    )
 
     # Location of incoming CSVs (from client uploads)
     CSV_GLOB = os.getenv("VOLTA_CSV_GLOB", "data/*.csv")
+
+
 
     # -------------------------
     # Data schema
