@@ -44,6 +44,8 @@ COLUMN_CLASS_MAP = {
     "ocd_paymoney": "text-nowrap text-end",
 }
 
+MODE = True
+
 def cache_dashboard_first_load(datastore, preview_rows, stats, summary, unique_values, chart_metrics, preview_html):
     # Convert all date objects to strings in preview_rows
     def convert_dates(obj):
@@ -114,13 +116,24 @@ def _format_prediction_value(column: str, value: object) -> str:
         return str(escape(str(value)))
 
 
-def _render_prediction_preview_table(rows: list[dict[str, object]], limit: int = PREVIEW_ROW_LIMIT) -> str:
-    """Render HTML table preview from list-of-dicts."""
+def _render_prediction_preview_table(
+    rows: list[dict[str, object]], 
+    limit: int = PREVIEW_ROW_LIMIT, 
+    is_public: bool = MODE
+) -> str:
+    """Render HTML table preview from list-of-dicts, hiding sensitive columns in public mode."""
+    
     if not rows or limit <= 0:
         return ""
 
     rows = rows[:limit]
+
+    # Determine which columns to show
     columns = list(rows[0].keys())
+    if is_public:
+        # hide sensitive columns
+        columns = [c for c in columns if c.lower() not in ("meterid", "customer_no")]
+
     metrics_service = get_metrics()
     column_labels = dict(COLUMN_LABEL_DEFAULTS)
 
@@ -147,6 +160,7 @@ def _render_prediction_preview_table(rows: list[dict[str, object]], limit: int =
         "</table>"
     )
     return table_html
+
 
 
 def _collect_historical_monthly(as_of: str, meterid: str | None = None) -> list[dict[str, object]]:
@@ -250,7 +264,7 @@ def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[st
         converted.append(item)
     return converted
 
-def index(first_load_override: bool | None = None):
+def index(first_load_override: bool | None = None, is_public: bool = MODE):
     """
     Dashboard index view. If first_load_override=True, treat as first load (ignore request.args).
     """
@@ -298,41 +312,36 @@ def index(first_load_override: bool | None = None):
             preview_html   VARCHAR
         );
     """)
+# --- Step 5: fetch preview rows only ---
+    preview_rows_sql = f'SELECT * FROM "{current_app.config["PARQUET_PATH"]}"'
+    if clause:
+        preview_rows_sql += f" WHERE {clause}"
+    preview_rows_sql += f" LIMIT {PREVIEW_ROW_LIMIT}"
 
-    # --- Step 4b: if first load, try loading cache ---
+    preview_rows = datastore.run_query(preview_rows_sql, sql_params)
+
+    # --- Step 4b (modified): if first load, cache dashboard now that preview_rows exists ---
     if first_load:
         row = datastore._con.execute(
             "SELECT * FROM dashboard_cache WHERE cache_key='full_load'"
         ).fetchone()
 
-        if row:
-            preview_rows = json.loads(row[1])
-            stats = json.loads(row[2])
-            summary = json.loads(row[3])
-            unique_values = json.loads(row[4])
-            chart_metrics = json.loads(row[5])
-            preview_html = row[6]
+        meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
+        unique_values = build_unique_values(
+            datastore, ["meterid", "utility", "tariff_type"], clause, sql_params, max_uniques=meter_cap
+        )
+        chart_metrics = metrics.available(preview_rows)
+        preview_html = _render_prediction_preview_table(preview_rows, PREVIEW_ROW_LIMIT, is_public=is_public)
 
-            start_value = summary.get("date_min", "")
-            end_value = summary.get("date_max", "")
-            default_metric = chart_metrics[0][0] if chart_metrics else ""
-
-            print("Loaded dashboard from cache", tracemalloc.get_traced_memory())
-            return render_template(
-                "index.html",
-                date_col=date_col,
-                stats=stats,
-                summary=summary,
-                start_value=start_value,
-                end_value=end_value,
-                unique_values=unique_values,
-                args=args_to_use,
-                total_rows=summary.get("rows", 0),
-                total_cols=len(columns),
-                preview_html=preview_html,
-                chart_metrics=chart_metrics,
-                default_metric=default_metric,
-            )
+        cache_dashboard_first_load(
+            datastore,
+            preview_rows,
+            stats,
+            summary,
+            unique_values,
+            chart_metrics,
+            preview_html
+        )
 
     # --- Step 5: fetch preview rows only ---
     preview_rows_sql = f'SELECT * FROM "{current_app.config["PARQUET_PATH"]}"'
@@ -354,8 +363,12 @@ def index(first_load_override: bool | None = None):
 
     # Step 8: unique meter & utility values with limits
     meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
+
+    # Only include meterid if not public
+    cols_to_include = ["utility", "tariff_type"] if is_public else ["meterid", "utility", "tariff_type"]
+
     unique_values = build_unique_values(
-        datastore, ["meterid", "utility"], clause, sql_params, max_uniques=meter_cap
+        datastore, cols_to_include, clause, sql_params, max_uniques=meter_cap
     )
 
     # Step 9: chart metrics (based on preview rows)
@@ -393,9 +406,10 @@ def index(first_load_override: bool | None = None):
         preview_html=preview_html,
         chart_metrics=chart_metrics,
         default_metric=default_metric,
+        is_public=is_public,
     )
 
-def predictions():
+def predictions(is_public:bool = MODE):
     datastore = get_datastore()
     meter_cap = current_app.config.get("METERID_MAX_OPTIONS", DEFAULT_METERID_LIMIT)
     sql = f'SELECT DISTINCT meterid AS v FROM "{current_app.config["PARQUET_PATH"]}" WHERE meterid IS NOT NULL ORDER BY v LIMIT {meter_cap}'
@@ -406,6 +420,7 @@ def predictions():
         "predictions.html",
         meter_options=meter_options,
         meterid_limit=int(meter_cap),
+        is_public = is_public
     )
 
 
@@ -534,17 +549,36 @@ def predictions_download():
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 
-
 # Register routes
 bp.add_url_rule("/", view_func=index, methods=["GET"])
+bp.add_url_rule(
+    "/public-dashboard",
+    view_func=lambda: index(is_public=True),
+    methods=["GET"],
+    endpoint="public_dashboard"  
+)
 bp.add_url_rule(
     "/reset-dashboard",
     view_func=lambda: index(first_load_override=True),
     methods=["POST"],
-    endpoint="reset_dashboard"
+    endpoint="reset_dashboard"  
 )
-bp.add_url_rule("/predictions", view_func=predictions, methods=["GET"])
+# Private predictions (meter filter visible)
+bp.add_url_rule(
+    "/predictions/private",
+    view_func=lambda: predictions(is_public=False),
+    methods=["GET"],
+    endpoint="predictions_private"
+)
+
+# Public predictions (no meter filter)
+bp.add_url_rule(
+    "/predictions",
+    view_func=lambda: predictions(is_public=True),
+    methods=["GET"],
+    endpoint="predictions_public"
+)
+
 bp.add_url_rule("/predictions/download", view_func=predictions_download, methods=["GET"])
 bp.add_url_rule("/predictions/api/predict-all", view_func=predictions_predict_all, methods=["POST"])
 bp.add_url_rule("/predictions/api/predict", view_func=predictions_predict_one, methods=["POST"])
-

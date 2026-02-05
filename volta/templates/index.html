@@ -3,13 +3,13 @@
 {% block content %}
 <div class="d-flex justify-content-end mb-3">
   <a
-    class="btn btn-primary"
-    href="{{ url_for('dashboard.predictions') }}"
-    target="_blank"
-    rel="noopener"
-  >
-    See Predictions
-  </a>
+  class="btn btn-primary"
+  href="{% if is_public %}{{ url_for('dashboard.predictions_public') }}{% else %}{{ url_for('dashboard.predictions_private') }}{% endif %}"
+  target="_blank"
+  rel="noopener"
+>
+  See Predictions
+</a>
 </div>
 <div class="row g-4">
   <div class="col-12 col-lg-4">
