@@ -64,6 +64,6 @@ class Config:
         "W": "W-MON",  # weekly anchored to Monday
         "M": "M",
     }
-
+    
 
 __all__ = ["Config"]

@@ -16,7 +16,7 @@ import json
 import datetime
 from werkzeug.datastructures import ImmutableMultiDict
 tracemalloc.start()
-PREDICT_ALL_AS_OF = "09-2020"
+PREDICT_ALL_AS_OF = "2020-09-01"
 PREVIEW_ROW_LIMIT = 10
 METRIC_COLUMNS = ["ocd_energy", "ocd_cash_received", "ocd_paymoney"]
 
@@ -164,7 +164,7 @@ def _collect_historical_monthly(as_of: str, meterid: str | None = None) -> list[
     where_sql = " AND ".join(clauses)
     sql = f'''
         SELECT
-            CAST(date_trunc('month', {date_col}) AS TEXT) AS month,
+            CAST(date_trunc('month', {date_col}) AS DATE) AS month,
             SUM(ocd_energy) AS ocd_energy,
             SUM(ocd_cash_received) AS ocd_cash_received,
             SUM(ocd_paymoney) AS ocd_paymoney
@@ -181,32 +181,72 @@ def _collect_historical_monthly(as_of: str, meterid: str | None = None) -> list[
 
 
 def _collect_forecast_monthly(predictions: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Aggregate forecast monthly metrics."""
+    """
+    Aggregate forecast metrics by month-end, ensuring output compatible with legacy charts.
+    Input: list of dicts (predictions)
+    Output: list of dicts with keys: month, ocd_energy, ocd_cash_received, ocd_paymoney
+    """
     if not predictions:
         return []
 
     monthly_map: dict[str, dict[str, object]] = {}
-    for row in predictions:
-        month = row.get("forecast_date")
-        if month is None:
-            continue
-        metrics = {metric: row.get(metric) for metric in METRIC_COLUMNS}
-        if month not in monthly_map:
-            monthly_map[month] = {"month": month, **metrics}
-        else:
-            for metric, value in metrics.items():
-                monthly_map[month][metric] = (monthly_map[month].get(metric, 0) or 0) + (value or 0)
 
-    return list(monthly_map.values())
+    for i, row in enumerate(predictions):
+        # Get the forecast date
+        month_val = row.get("Forecast Month") or row.get("forecast_date") or row.get("prediction_date")
+        if not month_val:
+            continue
+
+        # Convert to datetime
+        if isinstance(month_val, str):
+            try:
+                month_dt = datetime.datetime.fromisoformat(month_val)
+            except ValueError:
+                continue
+        elif isinstance(month_val, datetime.date):
+            month_dt = datetime.datetime.combine(month_val, datetime.time.min)
+        elif isinstance(month_val, datetime.datetime):
+            month_dt = month_val
+        else:
+            continue
+
+        # Normalize to month-end
+        next_month = (month_dt.replace(day=1) + datetime.timedelta(days=32)).replace(day=1)
+        month_end = next_month - datetime.timedelta(days=1)
+        month_key = month_end.date().isoformat()
+
+        # Extract metrics with fallback keys
+        metrics = {
+            "ocd_energy": row.get("Energy (kWh)") or row.get("ocd_energy") or row.get("energy_pred") or 0,
+            "ocd_paymoney": row.get("Paymoney") or row.get("ocd_paymoney") or row.get("paymoney_pred") or 0,
+            "ocd_cash_received": row.get("Cash Received (GHC)") or row.get("ocd_cash_received") or row.get("cash_pred") or 0,
+        }
+
+        # Aggregate sums per month
+        if month_key not in monthly_map:
+            monthly_map[month_key] = {"month": month_key, **metrics}
+        else:
+            for k, v in metrics.items():
+                monthly_map[month_key][k] = (monthly_map[month_key].get(k, 0) or 0) + (v or 0)
+
+    # Sort by month
+    result = sorted(monthly_map.values(), key=lambda x: x["month"])
+    return result
+
+
 
 
 def _convert_to_legacy_metrics(records: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Map internal metric column names to legacy API keys."""
+    """Map internal metric column names to legacy API keys and format month ISO."""
     converted = []
     for row in records:
-        item = {"month": row.get("month")}
+        month_val = row.get("month")
+        if isinstance(month_val, (datetime.date, datetime.datetime)):
+            month_val = month_val.strftime("%Y-%m-%d")
+        item = {"month": str(month_val)}
         for legacy, internal in LEGACY_PREDICTION_OUTPUT.items():
-            item[legacy] = row.get(internal)
+            val = row.get(internal)
+            item[legacy] = float(val) if val is not None else 0
         converted.append(item)
     return converted
 
@@ -370,15 +410,13 @@ def predictions():
 
 
 def _run_predict_all():
-    datastore = get_datastore()
     predictor = get_predictor()
-    return predictor.predict_all_from_db(datastore=datastore)
+    return predictor.predict_all_from_db(history_months=24)
 
 
 def _run_predict_one(meterid: int):
-    datastore = get_datastore()
     predictor = get_predictor()
-    return predictor.predict_one_meter_from_db(datastore=datastore, meterid=meterid)
+    return predictor.predict_one_meter_from_db(meterid)
 
 
 def predictions_predict_all():

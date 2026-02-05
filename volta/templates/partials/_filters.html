@@ -25,7 +25,6 @@
         'utility': 'Location',
         'tariff_type': "Account Type"
       } %}
-
       <div class="accordion" id="filtersAccordion">
         {% for col, vals in unique_values.items() %}
           {% set selected = args.getlist(col) %}
@@ -46,7 +45,7 @@
                    data-options-endpoint="{{ url_for('dashboard.options_meterid') }}">
               </div>
 
-            {% elif col|lower == 'loc' %}
+            {% elif col|lower == 'utility' %}
               {{ ui.checkbox_list(col, vals, selected, list_id='locList', searchable=true, placeholder='Search location') }}
 
             {% else %}

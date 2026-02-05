@@ -14,8 +14,9 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt requirements-forecast.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir -r requirements-forecast.txt
+RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install -y libgomp1 && rm -rf /var/lib/apt/lists/*
+
 
 # Copy the rest of the app
 COPY . .
