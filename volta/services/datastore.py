@@ -21,6 +21,23 @@ class DataStore:
         self.parquet_path = self.config["PARQUET_PATH"]
         self._con = duckdb.connect(database=self.config["DB_PATH"], read_only=False)
         self.date_col = self.config.get("DATE_COL", "od_date")
+    
+    def get_unique_utilities(self):
+        self._con.execute("""
+            CREATE TABLE IF NOT EXISTS predict_all_cache (
+                meterid           VARCHAR,
+                as_of             DATE,
+                horizon           INT,
+                prediction_date   DATE,
+                paymoney_pred     DOUBLE,
+                energy_pred       DOUBLE,
+                cash_pred         DOUBLE,
+                utility           VARCHAR,
+                PRIMARY KEY (meterid, as_of, prediction_date, horizon)
+            );
+        """)
+        result = self._con.execute("SELECT DISTINCT utility FROM predict_all_cache ORDER BY utility").fetchall()
+        return [r[0] for r in result]
 
     def get_columns(self) -> list[str]:
         """Cache columns instead of fetching every time."""

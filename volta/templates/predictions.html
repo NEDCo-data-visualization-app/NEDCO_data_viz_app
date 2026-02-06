@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
 
 {% block content %}
 <div class="mb-4">
@@ -24,9 +25,10 @@
               data-prediction-predict-all-endpoint="{{ url_for('dashboard.predictions_predict_all') }}"
               data-prediction-predict-endpoint="{{ url_for('dashboard.predictions_predict_one') }}"
         >
+
           {% if not is_public %}
           <!-- Meter Number Filter (private dashboards only) -->
-          <div class="accordion" id="meterNumberFilter">
+          <div class="accordion mb-3" id="meterNumberFilter">
             <div class="accordion-item">
               <h2 class="accordion-header" id="meterNumberHeading">
                 <button class="accordion-button bg-primary-subtle text-primary fw-semibold" type="button"
@@ -36,25 +38,25 @@
                 </button>
               </h2>
               <div id="meterNumberCollapse" class="accordion-collapse collapse show"
-                   aria-labelledby="meterNumberHeading" data-bs-parent="#meterNumberFilter">
+                  aria-labelledby="meterNumberHeading" data-bs-parent="#meterNumberFilter">
                 <div class="accordion-body">
                   <div class="mb-3">
                     <label for="predictionMeterSearch" class="form-label visually-hidden">Search Meter Number</label>
                     <input type="search" id="predictionMeterSearch" class="form-control"
-                           placeholder="Search meterid (type to load)" autocomplete="off"
-                           aria-label="Search meter number" data-prediction-meter-search />
+                          placeholder="Search meterid (type to load)" autocomplete="off"
+                          aria-label="Search meter number" data-prediction-meter-search />
                   </div>
                   <input type="hidden" name="meterid" id="predictionSelectedMeter" data-prediction-meter-input />
                   <div class="alert alert-info d-none align-items-center gap-2 py-2 px-3"
-                       role="status" data-prediction-meter-summary>
+                      role="status" data-prediction-meter-summary>
                     <span class="fw-semibold">Selected meter:</span>
                     <span data-prediction-meter-label></span>
                   </div>
                   <div class="border rounded overflow-auto" style="max-height: 260px;"
-                       data-prediction-meter-list
-                       data-options-endpoint="{{ url_for('dashboard.options_meterid') }}"
-                       data-limit="{{ meterid_limit }}"
-                       data-initial-options='{{ meter_options | tojson | safe }}'>
+                      data-prediction-meter-list
+                      data-options-endpoint="{{ url_for('dashboard.options_meterid') }}"
+                      data-limit="{{ meterid_limit }}"
+                      data-initial-options='{{ meter_options | tojson | safe }}'>
                     {% if meter_options %}
                       <div class="list-group list-group-flush">
                         {% for meter in meter_options %}
@@ -74,13 +76,32 @@
           </div>
           {% endif %}
 
+          <!-- Location Filter (public & private dashboards) -->
+          <div class="accordion mb-3" id="locationFilter">
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="locationHeading">
+                <button class="accordion-button bg-primary-subtle text-primary fw-semibold" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#locationCollapse"
+                        aria-expanded="true" aria-controls="locationCollapse">
+                  Location
+                </button>
+              </h2>
+              <div id="locationCollapse" class="accordion-collapse collapse show"
+                  aria-labelledby="locationHeading" data-bs-parent="#locationFilter">
+                <div class="accordion-body">
+                  {{ ui.checkbox_list('utility', location_options, selected_locations, list_id='predictionLocationList', searchable=true, placeholder='Search location') }}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Filter Buttons -->
           <div class="d-grid gap-2 gap-sm-3 d-sm-flex justify-content-sm-end">
-            <button type="button" class="btn btn-success" data-prediction-predict>Predict</button>
             <button type="button" class="btn btn-primary" data-prediction-predict-all>Predict All</button>
             <button type="reset" class="btn btn-outline-secondary" data-prediction-reset>Reset Filter</button>
           </div>
         </form>
+
       </div>
     </div>
   </div>
@@ -162,7 +183,7 @@
         <p class="text-muted small mb-3 d-none" data-prediction-summary></p>
 
         <!-- Render table HTML from backend -->
-        <div class="table-responsive">
+        <div class="table-responsive" data-prediction-table>
           {{ preview_html | safe }}
         </div>
       </div>

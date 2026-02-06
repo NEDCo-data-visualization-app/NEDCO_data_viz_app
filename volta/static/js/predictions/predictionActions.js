@@ -2,66 +2,85 @@ import { updatePredictionCharts } from './predictionCharts.js';
 
 const PREVIEW_LIMIT = 10;
 
-function setButtonLoading(button, isLoading) {
-  if (!button) return;
-  if (isLoading) {
-    button.dataset.originalText = button.dataset.originalText || button.textContent;
-    button.textContent = 'Loading…';
-    button.disabled = true;
-  } else {
-    if (button.dataset.originalText) {
-      button.textContent = button.dataset.originalText;
-    }
-    button.disabled = false;
-  }
-}
-
-function setStatus(statusEl, type, message) {
-  if (!statusEl) return;
-  statusEl.classList.remove('alert-info', 'alert-success', 'alert-danger');
-  if (type) {
-    statusEl.classList.add(`alert-${type}`);
-    statusEl.classList.remove('d-none');
-  } else {
-    statusEl.classList.add('d-none');
-  }
-  if (message !== undefined) {
-    statusEl.textContent = message;
-  }
-}
-
-export function initPredictionActions() {
+export function initPredictionActions({ isPublic = false } = {}) {
   const form = document.querySelector('[data-prediction-filters]');
   if (!form) return;
 
   const predictButton = form.querySelector('[data-prediction-predict]');
   const predictAllButton = form.querySelector('[data-prediction-predict-all]');
   const meterInput = form.querySelector('[data-prediction-meter-input]');
-  const statusEl = document.querySelector('[data-prediction-status]');
-  const summaryEl = document.querySelector('[data-prediction-summary]');
-  const tableContainer = document.querySelector('[data-prediction-table]');
-  const downloadButton = document.querySelector('[data-prediction-download]');
 
-  if ((!predictButton && !predictAllButton) || !statusEl || !tableContainer) return;
+  // Helper to get current filter selection
+  const getSelectedFilters = () => {
+    const filters = {};
 
-  const predictEndpoint = form.dataset.predictionPredictEndpoint;
-  const predictAllEndpoint = form.dataset.predictionPredictAllEndpoint;
-  const downloadAllUrl = downloadButton
-    ? downloadButton.dataset.downloadAllUrl || downloadButton.dataset.downloadUrl
-    : null;
-  const downloadMeterUrl = downloadButton
-    ? downloadButton.dataset.downloadMeterUrl || downloadButton.dataset.downloadUrl
-    : null;
+    // Meter ID only if private
+    if (!isPublic && meterInput && meterInput.value) {
+      filters.meterid = meterInput.value;
+    }
 
-  let activeDownloadUrl = null;
+    // Utility / Location always
+    const utilities = Array.from(form.querySelectorAll('[name="utility"]:checked'))
+      .map(el => el.value);
+    if (utilities.length) filters.utility = utilities;
 
-  const resetDownloadButton = () => {
-    if (!downloadButton) return;
-    activeDownloadUrl = null;
-    downloadButton.disabled = true;
-    downloadButton.classList.add('disabled');
+    return filters;
   };
 
+  // Update Predict All button label
+  const updatePredictAllLabel = () => {
+    const filters = getSelectedFilters();
+    const hasFilter = Object.keys(filters).length > 0;
+    predictAllButton.textContent = hasFilter ? 'Predict Filtered' : 'Predict All';
+  };
+
+  // --- Watch for changes on meter input ---
+  if (!isPublic && meterInput) {
+    meterInput.addEventListener('input', updatePredictAllLabel);
+  }
+
+  // --- Watch for changes on location checkboxes ---
+  const locationCheckboxes = form.querySelectorAll('[name="utility"]');
+  locationCheckboxes.forEach(cb => cb.addEventListener('change', updatePredictAllLabel));
+
+  // Initialize label on load
+  updatePredictAllLabel();
+
+  // --- Predict / Predict All button handlers ---
+  const predictEndpoint = form.dataset.predictionPredictEndpoint;
+  const predictAllEndpoint = form.dataset.predictionPredictAllEndpoint;
+
+  const setButtonLoading = (button, isLoading) => {
+    if (!button) return;
+    if (isLoading) {
+      button.dataset.originalText = button.dataset.originalText || button.textContent;
+      button.textContent = 'Loading…';
+      button.disabled = true;
+    } else {
+      if (button.dataset.originalText) button.textContent = button.dataset.originalText;
+      button.disabled = false;
+    }
+  };
+
+  const statusEl = document.querySelector('[data-prediction-status]');
+  const tableContainer = document.querySelector('[data-prediction-table]');
+  const summaryEl = document.querySelector('[data-prediction-summary]');
+  const downloadButton = document.querySelector('[data-prediction-download]');
+
+  const setStatus = (type, message) => {
+    if (!statusEl) return;
+    statusEl.classList.remove('alert-info', 'alert-success', 'alert-danger');
+    if (type) {
+      statusEl.classList.add(`alert-${type}`);
+      statusEl.classList.remove('d-none');
+      statusEl.textContent = message;
+    } else {
+      statusEl.classList.add('d-none');
+      statusEl.textContent = '';
+    }
+  };
+
+  let activeDownloadUrl = null;
   const setDownloadTarget = (url) => {
     if (!downloadButton) return;
     if (url) {
@@ -69,168 +88,101 @@ export function initPredictionActions() {
       downloadButton.disabled = false;
       downloadButton.classList.remove('disabled');
     } else {
-      resetDownloadButton();
+      activeDownloadUrl = null;
+      downloadButton.disabled = true;
+      downloadButton.classList.add('disabled');
     }
   };
 
-  const updateSummary = ({ count = 0, asOf = '', meterid = '', scope = '' } = {}) => {
-    if (!summaryEl) return;
-    if (!count) {
-      summaryEl.textContent = '';
-      summaryEl.classList.add('d-none');
+  const handleApiResponse = (data, isPredictAll = false) => {
+    if (!data.ok) {
+      setStatus('danger', data.error || 'Prediction failed');
+      tableContainer.innerHTML = '';
+      setDownloadTarget(null);
       return;
     }
-    const shown = Math.min(PREVIEW_LIMIT, count);
-    const details = [];
-    if (meterid) {
-      details.push(`for meter ${meterid}`);
-    } else if (scope === 'all') {
-      details.push('across all meters');
-    }
-    const suffix = asOf ? ` (as of ${asOf})` : '';
-    const detailText = details.length ? ` ${details.join(' ')}` : '';
-    summaryEl.textContent = `Showing first ${shown} of ${count} rows${detailText}${suffix}.`;
+
+    tableContainer.innerHTML = data.preview_html || '';
+    if (typeof updatePredictionCharts === 'function') updatePredictionCharts(data.charts);
+
+    const { row_count, as_of, meterid, scope } = data;
+    const shown = Math.min(10, row_count);
+    let summaryText = `Showing first ${shown} of ${row_count} rows`;
+    if (!isPublic && meterid) summaryText += ` for meter ${meterid}`;
+    else if (scope === 'all') summaryText += ' across all meters';
+    if (as_of) summaryText += ` (as of ${as_of})`;
+    summaryEl.textContent = summaryText;
     summaryEl.classList.remove('d-none');
+
+    // Build download URL with current filters
+    const filters = getSelectedFilters();
+    const query = new URLSearchParams();
+    if (filters.meterid) query.append('meterid', filters.meterid);
+    (filters.utility || []).forEach(u => query.append('utility', u));
+
+    const downloadUrl = filters.meterid
+      ? form.dataset.downloadMeterUrl + '?' + query.toString()
+      : form.dataset.downloadAllUrl + '?' + query.toString();
+    setDownloadTarget(downloadUrl);
   };
-
-  const clearTable = () => {
-    if (!tableContainer) return;
-    tableContainer.innerHTML = '';
-    tableContainer.classList.add('d-none');
-  };
-
-  const renderTable = (html) => {
-    if (!tableContainer) return;
-    if (html) {
-      tableContainer.innerHTML = html;
-      tableContainer.classList.remove('d-none');
-    } else {
-      clearTable();
-    }
-  };
-
-  const runPredictionRequest = async ({
-    endpoint,
-    button,
-    body = {},
-    loadingMessage,
-    successMessage,
-    enableDownload = false,
-    scopeFallback = '',
-    meterid,
-    downloadUrl,
-  }) => {
-    if (!endpoint || !button) return;
-
-    setButtonLoading(button, true);
-    setStatus(statusEl, 'info', loadingMessage || 'Generating predictions…');
-    clearTable();
-    updateSummary();
-    resetDownloadButton();
-    updatePredictionCharts(null);
-
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {}),
-      });
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-      const payload = await response.json();
-      if (!payload.ok) {
-        const message = payload.error || 'Unable to generate predictions.';
-        setStatus(statusEl, 'danger', message);
-        updateSummary();
-        updatePredictionCharts(null);
-        return;
-      }
-
-      renderTable(payload.preview_html || '');
-      updateSummary({
-        count: payload.row_count || 0,
-        asOf: payload.as_of || '',
-        meterid: payload.meterid || meterid || '',
-        scope: payload.scope || scopeFallback,
-      });
-      updatePredictionCharts(payload.charts || null);
-
-      if (payload.row_count) {
-        const message =
-          typeof successMessage === 'function'
-            ? successMessage(payload)
-            : successMessage || 'Predictions loaded.';
-        setStatus(statusEl, 'success', message);
-        if (enableDownload && downloadUrl) {
-          setDownloadTarget(downloadUrl);
-        } else {
-          resetDownloadButton();
-        }
-      } else {
-        setStatus(statusEl, 'info', 'No prediction results returned.');
-        resetDownloadButton();
-      }
-    } catch (error) {
-      console.error('Prediction request failed', error);
-      setStatus(statusEl, 'danger', 'Unable to generate predictions. Please try again later.');
-      updatePredictionCharts(null);
-    } finally {
-      setButtonLoading(button, false);
-    }
-  };
-
-  if (predictAllButton) {
-    predictAllButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      runPredictionRequest({
-        endpoint: predictAllEndpoint,
-        button: predictAllButton,
-        body: {},
-        loadingMessage: 'Generating predictions…',
-        successMessage: 'Predictions loaded.',
-        enableDownload: true,
-        downloadUrl: downloadAllUrl,
-        scopeFallback: 'all',
-      });
-    });
-  }
 
   if (predictButton) {
-    predictButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      const selectedMeter = (meterInput?.value || '').trim();
-      if (!selectedMeter) {
-        setStatus(statusEl, 'info', 'Select a meter before running Predict.');
+    predictButton.addEventListener('click', async () => {
+      const filters = getSelectedFilters();
+      if (!isPublic && !filters.meterid) {
+        setStatus('danger', 'Please select a meter to predict.');
         return;
       }
+      setButtonLoading(predictButton, true);
+      setStatus(null);
 
-      const meterDownloadUrl = downloadMeterUrl
-        ? `${downloadMeterUrl}?meterid=${encodeURIComponent(selectedMeter)}`
-        : null;
-
-      runPredictionRequest({
-        endpoint: predictEndpoint,
-        button: predictButton,
-        body: { meterid: selectedMeter },
-        loadingMessage: `Generating predictions for meter ${selectedMeter}…`,
-        successMessage: (payload) =>
-          `Predictions loaded for meter ${payload.meterid || selectedMeter}.`,
-        enableDownload: true,
-        scopeFallback: 'meter',
-        meterid: selectedMeter,
-        downloadUrl: meterDownloadUrl,
-      });
+      try {
+        const response = await fetch(predictEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(filters)
+        });
+        const data = await response.json();
+        handleApiResponse(data);
+      } catch (err) {
+        console.error(err);
+        setStatus('danger', 'Prediction failed due to network or server error.');
+      } finally {
+        setButtonLoading(predictButton, false);
+      }
     });
   }
 
-  if (downloadButton) {
-    downloadButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      if (downloadButton.disabled || !activeDownloadUrl) return;
-      window.location.assign(activeDownloadUrl);
+  if (predictAllButton) {
+    predictAllButton.addEventListener('click', async () => {
+      const filters = getSelectedFilters();
+      setButtonLoading(predictAllButton, true);
+      setStatus(null);
+
+      try {
+        const response = await fetch(predictAllEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(filters)
+        });
+        const data = await response.json();
+        handleApiResponse(data, true);
+      } catch (err) {
+        console.error(err);
+        setStatus('danger', 'Prediction failed due to network or server error.');
+      } finally {
+        setButtonLoading(predictAllButton, false);
+      }
     });
   }
 
-  resetDownloadButton();
+  const resetButton = form.querySelector('[data-prediction-reset]');
+if (resetButton) {
+  resetButton.addEventListener('click', () => {
+    // Timeout needed because form.reset() happens after click
+    setTimeout(() => {
+      updatePredictAllLabel();
+    }, 0);
+  });
+}
 }

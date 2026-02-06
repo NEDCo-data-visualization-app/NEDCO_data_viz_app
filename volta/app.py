@@ -28,13 +28,26 @@ def create_app(
 ) -> Flask:
     """Create and configure the Flask application."""
 
+    import os, sys
+    from .config import Config
+    from .services.datastore import DataStore
+    from .services.metrics import Metrics
+
+    from .routes.dashboard import bp as dashboard_bp
+    # Import submodules now to register routes
+    from .routes.dashboard import aggregates, charts, downloads, filters, health, meterid, views
+    from .routes.upload import upload_bp
+
     if getattr(sys, "frozen", False):
         template_folder = os.path.join(sys._MEIPASS, "volta", "templates")
         static_folder = os.path.join(sys._MEIPASS, "volta", "static")
         app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
     else:
-        app = Flask(__name__) 
+        app = Flask(__name__)
 
+    # -----------------------
+    # Config
+    # -----------------------
     if config_object is None:
         app.config.from_object(Config)
     elif isinstance(config_object, Mapping):
@@ -42,15 +55,23 @@ def create_app(
     else:
         app.config.from_object(config_object)
 
+    # -----------------------
+    # Initialize extensions
+    # -----------------------
     metrics = Metrics(app.config["METRICS"])
-    datastore = DataStore(config=app.config,metrics=metrics)
+    datastore = DataStore(config=app.config, metrics=metrics)
 
     app.extensions["metrics"] = metrics
     app.extensions["datastore"] = datastore
 
-    app.register_blueprint(bp)
+    # -----------------------
+    # Register blueprints (after importing submodules)
+    # -----------------------
+    app.register_blueprint(dashboard_bp)
     app.register_blueprint(upload_bp)
+
     return app
+
 
 
 __all__ = ["create_app"]
