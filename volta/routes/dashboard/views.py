@@ -37,11 +37,13 @@ LEGACY_PREDICTION_OUTPUT_FORECAST = {
 
 COLUMN_LABEL_DEFAULTS = {
     "meterid": "Meter ID",
-    "forecast_date": "Forecast Month",
+    "utility":"Location",
+    "as_of":"As Of",
+    "prediction_date": "Forecast Month",
     "horizon": "Horizon (Months Ahead)",
-    "ocd_energy": "Energy (kWh)",
-    "ocd_cash_received": "Cash Received (GHC)",
-    "ocd_paymoney": "Paymoney",
+    "energy_pred": "Energy (kWh)",
+    "cash_pred": "Cash Received (GHC)",
+    "paymoney_pred": "Paymoney",
 }
 
 COLUMN_CLASS_MAP = {
@@ -541,10 +543,12 @@ def predictions_predict_all():
         meterid=selected_meter,
         utilities=selected_utilities  # optional
     )
-
+    selected_utilities = payload.get("utility", [])
+    selected_meter = payload.get("meterid")
+    row_count = _get_cached_predict_all_count(datastore, meterid=selected_meter, utilities=selected_utilities)
     return jsonify({
         "ok": True,
-        "row_count": len(predictions_list),
+        "row_count": row_count,
         "preview_rows": min(PREVIEW_ROW_LIMIT, len(predictions_list)),
         "preview_html": preview_html,
         "as_of": as_of,
@@ -658,11 +662,15 @@ def predictions_predict_one():
     except Exception as e:
         print(f"[ERROR] Error rendering preview table: {e}")
         return jsonify({"ok": False, "error": "Error generating preview table"}), 500
+    selected_utilities = payload.get("utility", [])
+    selected_meter = payload.get("meterid")
+    
+    row_count = _get_cached_predict_all_count(datastore, meterid=selected_meter, utilities=selected_utilities)
 
     # Step 6: Construct response
     response = {
         "ok": True,
-        "row_count": len(predictions_list),
+        "row_count": row_count,
         "preview_rows": min(PREVIEW_ROW_LIMIT, len(predictions_list)),
         "preview_html": preview_html,
         "as_of": as_of,
@@ -677,11 +685,6 @@ def predictions_predict_one():
     print(f"[INFO] Predict One response ready for meterid={meterid}")
     print("=== predictions_predict_one END ===")
     return jsonify(response)
-
-
-
-
-
 
 def _add_location_to_predictions(preds):
     # Ensure preds is a DataFrame
@@ -745,72 +748,27 @@ def _cache_predict_all(datastore, preds_df):
         records
     )
 
-def _cached_predictions_to_chart_monthly(rows):
-    monthly = {}
-
-    for r in rows:
-        prediction_date = r["prediction_date"]
-        if not prediction_date:
-            continue
-
-        # normalize to month start
-        month = prediction_date.replace(day=1).isoformat()
-
-        if month not in monthly:
-            monthly[month] = {
-                "month": month,
-                "kwh": 0.0,
-                "paymoney": 0.0,
-                "ghc": 0.0,
-            }
-
-        monthly[month]["kwh"] += r.get("energy_pred") or 0
-        monthly[month]["paymoney"] += r.get("paymoney_pred") or 0
-        monthly[month]["ghc"] += r.get("cash_pred") or 0
-
-    return sorted(monthly.values(), key=lambda x: x["month"])
-
-def _get_cached_predict_all(datastore, meterid: str | None = None):
+def _get_cached_predict_all_count(datastore, meterid: str | None = None, utilities: list[str] | None = None):
     _ensure_predict_all_cache_table(datastore)
 
-    if meterid:
-        sql = """
-            SELECT
-                DATE_TRUNC('month', prediction_date)::DATE AS month,
-                SUM(energy_pred)   AS kwh,
-                SUM(paymoney_pred) AS paymoney,
-                SUM(cash_pred)     AS ghc
-            FROM predict_all_cache
-            WHERE meterid = ?
-            GROUP BY month
-            ORDER BY month
-        """
-        rows = datastore._con.execute(sql, [str(meterid)]).fetchall()
-    else:
-        sql = """
-            SELECT
-                DATE_TRUNC('month', prediction_date)::DATE AS month,
-                SUM(energy_pred)   AS kwh,
-                SUM(paymoney_pred) AS paymoney,
-                SUM(cash_pred)     AS ghc
-            FROM predict_all_cache
-            GROUP BY month
-            ORDER BY month
-        """
-        rows = datastore._con.execute(sql).fetchall()
+    sql = "SELECT COUNT(*) FROM predict_all_cache"
+    where_clauses = []
+    params: list[object] = []
 
-    if not rows:
-        return None
+    if meterid is not None:
+        where_clauses.append("meterid = ?")
+        params.append(str(meterid))
 
-    return [
-        {
-            "month": r[0].isoformat(),
-            "kwh": float(r[1] or 0.0),
-            "paymoney": float(r[2] or 0.0),
-            "ghc": float(r[3] or 0.0),
-        }
-        for r in rows
-    ]
+    if utilities:
+        placeholders = ", ".join("?" for _ in utilities)
+        where_clauses.append(f"utility IN ({placeholders})")
+        params.extend(utilities)
+
+    if where_clauses:
+        sql += " WHERE " + " AND ".join(where_clauses)
+
+    row = datastore._con.execute(sql, params).fetchone()
+    return row[0] if row else 0
 
 
 
@@ -859,6 +817,8 @@ def predictions_predict_all_cached():
     datastore = get_datastore()
     predictor = get_predictor()
 
+    payload = request.get_json(silent=True) or {}
+
     try:
         preds_df = predictor.predict_all_from_db()
     except Exception:
@@ -874,10 +834,15 @@ def predictions_predict_all_cached():
 
     # Cache into DuckDB
     _cache_predict_all(datastore, preds_df, preview_html)
+    selected_utilities = payload.get("utility", [])
+    selected_meter = payload.get("meterid")
+
+    row_count = _get_cached_predict_all_count(datastore, meterid=selected_meter, utilities=selected_utilities)
+
 
     return jsonify({
         "ok": True,
-        "row_count": len(preds_df),
+        "row_count": row_count,
         "preview_rows": min(PREVIEW_ROW_LIMIT, len(preds_df)),
         "preview_html": preview_html
     })
