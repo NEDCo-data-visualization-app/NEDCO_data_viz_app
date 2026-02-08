@@ -171,16 +171,21 @@ def _render_prediction_preview_table(
     return table_html
 
 
-def _collect_historical_monthly(as_of: str, meterid: int | None = None) -> list[dict[str, object]]:
+def _collect_historical_monthly(as_of: str, meterid: int | None = None, utilities: list[str] | None = None):
     datastore = get_datastore()
     date_col = current_app.config.get("DATE_COL", "od_date")
 
     where_clauses = [f"{date_col} <= ?"]
-    params: list[object] = [as_of]
+    params = [as_of]
 
     if meterid is not None:
         where_clauses.append("CAST(meterid AS BIGINT) = ?")
         params.append(int(meterid))
+
+    if utilities:
+        placeholders = ", ".join("?" for _ in utilities)
+        where_clauses.append(f"utility IN ({placeholders})")
+        params.extend(utilities)
 
     where_sql = " AND ".join(where_clauses)
 
@@ -195,13 +200,7 @@ def _collect_historical_monthly(as_of: str, meterid: int | None = None) -> list[
         GROUP BY month
         ORDER BY month
     """
-
-    print(f"[DEBUG] _collect_historical_monthly SQL: {sql}")
-    print(f"[DEBUG] _collect_historical_monthly params: {params}")
-
     rows = datastore._con.execute(sql, params).fetchall()
-    print(f"[DEBUG] _collect_historical_monthly returned {len(rows)} rows")
-    print(f"[DEBUG] Sample of first 5 rows: {rows[:5]}")
 
     return [
         {"month": r[0].isoformat(), "kwh": float(r[1] or 0), "paymoney": float(r[2] or 0), "ghc": float(r[3] or 0)}
@@ -247,7 +246,11 @@ def _get_cached_predict_all_raw(datastore, meterid: str | None = None, utilities
 
 
 
-def _collect_forecast_monthly(meterid: int | None = None) -> list[dict[str, object]]:
+def _collect_forecast_monthly(meterid: int | None = None, utilities: list[str] | None = None) -> list[dict[str, object]]:
+    """
+    Return monthly aggregated forecast metrics (kWh, paymoney, GHC)
+    optionally filtered by meter ID and/or utilities.
+    """
     datastore = get_datastore()
 
     where_clauses = ["prediction_date > DATE '2020-08-31'",
@@ -255,11 +258,16 @@ def _collect_forecast_monthly(meterid: int | None = None) -> list[dict[str, obje
     params: list[object] = []
 
     if meterid is not None:
-        # ✅ CAST meterid as BIGINT and compare with integer
         where_clauses.append("CAST(meterid AS BIGINT) = ?")
         params.append(int(meterid))
 
+    if utilities:
+        placeholders = ", ".join("?" for _ in utilities)
+        where_clauses.append(f"utility IN ({placeholders})")
+        params.extend(utilities)
+
     where_sql = " AND ".join(where_clauses)
+
     sql = f"""
         SELECT
             DATE_TRUNC('month', prediction_date)::DATE AS month,
@@ -275,9 +283,15 @@ def _collect_forecast_monthly(meterid: int | None = None) -> list[dict[str, obje
     rows = datastore._con.execute(sql, params).fetchall()
 
     return [
-        {"month": r[0].isoformat(), "kwh": float(r[1] or 0), "paymoney": float(r[2] or 0), "ghc": float(r[3] or 0)}
+        {
+            "month": r[0].isoformat(),
+            "kwh": float(r[1] or 0),
+            "paymoney": float(r[2] or 0),
+            "ghc": float(r[3] or 0)
+        }
         for r in rows
     ]
+
 
 
 
@@ -518,8 +532,15 @@ def predictions_predict_all():
         return jsonify({"ok": False, "error": "No cached predictions found"}), 404
 
     preview_html = _render_prediction_preview_table(predictions_list, PREVIEW_ROW_LIMIT)
-    historical_monthly = _collect_historical_monthly(as_of)
-    forecast_monthly = _collect_forecast_monthly()
+    historical_monthly = _collect_historical_monthly(
+        as_of,
+        meterid=selected_meter,
+        utilities=selected_utilities  # optional, you'll need to add support in function
+    )
+    forecast_monthly = _collect_forecast_monthly(
+        meterid=selected_meter,
+        utilities=selected_utilities  # optional
+    )
 
     return jsonify({
         "ok": True,
