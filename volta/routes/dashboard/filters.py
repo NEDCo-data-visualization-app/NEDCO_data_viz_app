@@ -11,6 +11,10 @@ from volta.utils.filter_params import FilterParams
 def filter_options():
     datastore = get_datastore()
     payload = request.get_json(silent=True) or {}
+
+    # 🔹 FULL DEBUG: log incoming payload
+    print("[FILTER OPTIONS] Received payload:", payload)
+
     exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
 
     # ---------- Determine columns ----------
@@ -34,6 +38,9 @@ def filter_options():
         if cleaned:
             selections[real_col] = cleaned
 
+    # 🔹 DEBUG: log parsed selections
+    print("[FILTER OPTIONS] Parsed selections:", selections)
+
     # ---------- Determine facets ----------
     facets_in = payload.get("facets") or []
     resolved_facets: Dict[str, str] = {}
@@ -47,14 +54,22 @@ def filter_options():
             if candidate in base_cols:
                 resolved_facets[candidate] = candidate
 
+    print("[FILTER OPTIONS] Resolved facets:", resolved_facets)
+
     # ---------- Build FilterParams ----------
+    freq = (payload.get("freq") or "D").upper()
+    metric = payload.get("metric") or None
     params = FilterParams(
         start=_parse_date(str(payload.get("start_date") or "")),
         end=_parse_date(str(payload.get("end_date") or "")),
         selections=selections,
-        freq=(payload.get("freq") or "D").upper(),
-        metric=payload.get("metric") or None,
+        freq=freq,
+        metric=metric,
     )
+
+    # 🔹 DEBUG: log FilterParams state
+    print("[FILTER OPTIONS] FilterParams: start=%s, end=%s, metric=%s, freq=%s" %
+      (params.start, params.end, params.metric, params.freq))
 
     date_col = current_app.config["DATE_COL"]
     clause, sql_params = params.to_sql_where(date_col=date_col, available_columns=base_cols)
@@ -67,7 +82,6 @@ def filter_options():
             WHERE {clause} AND {col} IS NOT NULL
             ORDER BY v
         '''
-        # Use run_query normally since DISTINCT is usually small
         rows = datastore.run_query(sql, sql_params)
         return [str(r["v"]) for r in rows] if rows else []
 
@@ -97,10 +111,16 @@ def filter_options():
     count_rows = datastore.run_query(sql_count, sql_params)
     rows = int(count_rows[0]["n"]) if count_rows else 0
 
-    return jsonify(
-        {
-            "options": unique_values,
-            "dates": {"min": date_min, "max": date_max},
-            "rows": rows,
-        }
-    )
+    # 🔹 DEBUG: log final response
+    response = {
+        "options": unique_values,
+        "dates": {"min": date_min, "max": date_max},
+        "rows": rows,
+        "metric": metric,
+        "freq": freq,
+        "start_date": str(payload.get("start_date") or ""),
+        "end_date": str(payload.get("end_date") or ""),
+    }
+    print("[FILTER OPTIONS] Response:", response)
+
+    return jsonify(response)

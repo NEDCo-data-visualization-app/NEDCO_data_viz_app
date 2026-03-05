@@ -221,7 +221,7 @@ function buildPaymentsConfig(data, mode) {
 
     const ghcHist = mapMetricValues(monthKeys, historicalMap, 'ghc');
     datasets.push({
-      label: 'GHC (historical)',
+      label: 'Cash Received (historical)',
       data: ghcHist,
       borderColor: '#198754',
       backgroundColor: '#198754',
@@ -251,7 +251,7 @@ function buildPaymentsConfig(data, mode) {
 
   const ghcForecast = mapMetricValues(monthKeys, forecastMap, 'ghc');
   datasets.push({
-    label: mode === 'combined' ? 'GHC (forecast)' : 'GHC forecast',
+    label: mode === 'combined' ? 'Cash Received (forecast)' : 'Cash Received forecast',
     data: ghcForecast,
     borderColor: '#198754',
     backgroundColor: '#198754',
@@ -280,13 +280,13 @@ function buildPaymentsConfig(data, mode) {
       paymoney: {
         type: 'linear',
         position: 'left',
-        title: { display: true, text: 'Paymoney' },
+        title: { display: true, text: 'Paymoney (GHC)' },
         beginAtZero: true
       },
       ghc: {
         type: 'linear',
         position: 'right',
-        title: { display: true, text: 'GHC' },
+        title: { display: true, text: 'Cash Received (GHC)' },
         grid: { drawOnChartArea: false },
         beginAtZero: true
       }

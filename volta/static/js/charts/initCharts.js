@@ -34,6 +34,8 @@ export function initCharts() {
   const barEl      = document.getElementById('barChart');
   const pieRow     = document.getElementById('pieChartsRow');
   const checkboxes = document.querySelectorAll('.metric-checkbox');
+  const metricHidden = document.getElementById('metricHidden');
+  const freqHidden   = document.getElementById('freqHidden');
   let refreshToken = 0;
   if (!checkboxes.length || !freqSelect || !lineEl) return;
 
@@ -48,7 +50,13 @@ export function initCharts() {
     const token = ++refreshToken; 
     const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);
     const metrics = checkedBoxes.map(cb => cb.value);
+    if (metricHidden) {
+        metricHidden.value = metrics.join(',');
+      }
     const freq    = freqSelect.value;
+    if (freqHidden) {
+      freqHidden.value = freq;
+    }
     const splitBy = document.querySelector('[data-splitby]:checked')?.value || null;
 
     updateUrlQuery(metrics.join(','), freq, splitBy);

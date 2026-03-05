@@ -28,4 +28,4 @@ EXPOSE 5000
 VOLUME ["/app/data"]
 
 # Run Flask server
-CMD ["flask", "run"]
+CMD ["flask", "run", "--no-threading"]

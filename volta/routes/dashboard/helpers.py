@@ -25,46 +25,52 @@ def _parse_date(value: str) -> Optional[date]:
             return None
 
 
-def build_params(args, base_columns: Optional[List[str]] = None) -> FilterParams:
-    """
-    Build FilterParams from request args, case-insensitive columns.
-    base_columns: list of column names (optional)
-    """
-    selections: Dict[str, List[str]] = {}
-    exclude_cols = current_app.config.get("EXCLUDE_COLS", set())
-    cols_lc = {str(c).lower(): c for c in (base_columns or [])}
+# Add this to your helpers.py or wherever build_params is defined
 
-    if base_columns:
-        for column in base_columns:
-            if column in exclude_cols:
-                continue
-            values = args.getlist(column) or args.getlist(str(column).lower())
-            if values:
-                selections[column] = [str(v) for v in values]
-
+def build_params(args, base_columns):
+    """
+    Build FilterParams from request args.
+    Handles comma-separated metric values properly.
+    """
+    from datetime import datetime
+    from volta.utils.filter_params import FilterParams
+    
+    # Parse dates
+    start = args.get('start_date', '').strip()
+    end = args.get('end_date', '').strip()
+    start_date = datetime.strptime(start, '%Y-%m-%d').date() if start else None
+    end_date = datetime.strptime(end, '%Y-%m-%d').date() if end else None
+    
+    # Parse frequency
+    freq = args.get('freq', 'M').upper()
+    if freq not in ('D', 'W', 'M'):
+        freq = 'M'
+    
+    # 🔑 FIX: Handle metric properly (comma-separated OR single value)
+    metric_raw = args.get('metric', '').strip()
+    # Keep comma-separated value as-is (don't split it)
+    metric = metric_raw if metric_raw else None
+    
+    # Parse selections (filters like utility, tariff_type, etc.)
+    selections = {}
     for key in args.keys():
-        if key in selections:
-            continue
-        real_col = cols_lc.get(str(key).lower())
-        if real_col and real_col not in exclude_cols:
-            vals = args.getlist(key)
-            if vals:
-                selections[real_col] = [str(v) for v in vals]
-
-    freq = (args.get("freq") or "D").upper()
-    if freq not in ("D", "W", "M"):
-        freq = "D"
-
-    metric = args.get("metric") or None
-
+        if key in ('start_date', 'end_date', 'freq', 'metric'):
+            continue  # Skip non-filter params
+        
+        # Get all values for this key (handles checkboxes)
+        values = args.getlist(key)
+        if values and key.lower() in [c.lower() for c in base_columns]:
+            # Find the actual column name (case-insensitive match)
+            actual_col = next(c for c in base_columns if c.lower() == key.lower())
+            selections[actual_col] = [str(v) for v in values if v]
+    
     return FilterParams(
-        start=_parse_date(args.get("start_date", "")),
-        end=_parse_date(args.get("end_date", "")),
+        start=start_date,
+        end=end_date,
         selections=selections,
         freq=freq,
         metric=metric,
     )
-
 
 
 def build_unique_values(

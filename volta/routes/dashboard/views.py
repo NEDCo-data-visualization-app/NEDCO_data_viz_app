@@ -55,7 +55,39 @@ COLUMN_CLASS_MAP = {
     "ocd_paymoney": "text-nowrap text-end",
 }
 
-MODE = True
+_CURRENT_DASHBOARD_STATE: dict | None = None
+
+MODE = False
+
+def _set_dashboard_state(state: dict):
+    global _CURRENT_DASHBOARD_STATE
+    _CURRENT_DASHBOARD_STATE = state
+
+'''
+def _set_current_predictions(df: pd.DataFrame):
+    """Overwrite the memory slot with new predictions."""
+    global _CURRENT_PREDICTIONS
+    # Delete old copy to free memory
+    if _CURRENT_PREDICTIONS is not None:
+        del _CURRENT_PREDICTIONS
+        import gc
+        gc.collect()
+    _CURRENT_PREDICTIONS = df.copy()
+
+def _get_current_predictions(filtered_meterid: int | None = None, filtered_utilities: list[str] | None = None):
+    """Return predictions from memory, optionally filtered, without duplicating the full dataset."""
+    if _CURRENT_PREDICTIONS is None:
+        return pd.DataFrame()  # empty
+
+    df = _CURRENT_PREDICTIONS
+
+    if filtered_meterid is not None:
+        df = df[df["meterid"].astype(str) == str(filtered_meterid)]
+    if filtered_utilities:
+        df = df[df["utility"].isin(filtered_utilities)]
+    
+    return df
+'''
 
 def cache_dashboard_first_load(datastore, preview_rows, stats, summary, unique_values, chart_metrics, preview_html):
     # Convert all date objects to strings in preview_rows
@@ -314,10 +346,32 @@ def _convert_to_legacy_metrics(records: list[dict[str, object]], mapping: dict[s
         converted.append(item)
     return converted
 
+# Add this debugging code at the start of your index() function
+# This will help you see exactly what's coming through
+
 def index(first_load_override: bool | None = None, is_public: bool = MODE):
-    """
-    Dashboard index view. If first_load_override=True, treat as first load (ignore request.args).
-    """
+    """Dashboard index view."""
+    
+    # 🔍 DEBUG: Log all incoming request parameters
+    print("\n" + "="*60)
+    print("[INDEX ROUTE] Request Args Debug:")
+    print("="*60)
+    print(f"request.method: {request.method}")
+    print(f"request.url: {request.url}")
+    print(f"request.query_string: {request.query_string.decode()}")
+    print("\nAll args:")
+    for key in request.args.keys():
+        values = request.args.getlist(key)
+        print(f"  {key}: {values}")
+    
+    # Specifically check metric
+    metric_single = request.args.get('metric')
+    metric_list = request.args.getlist('metric')
+    print(f"\nMetric (single): {metric_single}")
+    print(f"Metric (list): {metric_list}")
+    print("="*60 + "\n")
+    
+    # ... rest of your index function
     datastore = get_datastore()
     metrics = get_metrics()
     date_col = current_app.config.get("DATE_COL", "od_date")
@@ -493,66 +547,100 @@ def predictions(is_public=False):
     )
 
 
-
+'''
 def _run_predict_all():
+    """
+    Load all predictions into the single memory slot.
+    """
     datastore = get_datastore()
 
-    cached = _get_cached_predict_all_raw(datastore)
-    if cached:
-        return pd.DataFrame(cached)
+    # If we already have them, reuse
+    global _CURRENT_PREDICTIONS
+    if _CURRENT_PREDICTIONS is not None:
+        return _CURRENT_PREDICTIONS
 
     predictor = get_predictor()
     preds_df = predictor.predict_all_from_db()
     preds_df = _add_location_to_predictions(preds_df)
+
+    # Store in the single memory slot
+    _set_current_predictions(preds_df)
+
+    # Cache into DuckDB if needed
     _cache_predict_all(datastore, preds_df)
 
     return preds_df
 
 def _run_predict_one(meterid: int):
+    """
+    Load only one meter into the memory slot.
+    Overwrites whatever was in _CURRENT_PREDICTIONS.
+    """
     predictor = get_predictor()
-    return predictor.predict_one_meter_from_db(meterid)
+    df = predictor.predict_one_meter_from_db(meterid)
+    df = _add_location_to_predictions(df)
 
+    # Overwrite the memory slot
+    _set_current_predictions(df)
+
+    return df
+'''
 def predictions_predict_all():
     datastore = get_datastore()
     as_of = PREDICT_ALL_AS_OF
 
     payload = request.get_json(silent=True) or {}
-    selected_utilities = payload.get("utility", [])
-    if isinstance(selected_utilities, str):
-        selected_utilities = [selected_utilities]
+    utilities = payload.get("utility") or []
+    meterid = payload.get("meterid")
 
-    selected_meter = payload.get("meterid")  # could be None
-
-    # Fetch cached predictions with filters in SQL
-    predictions_list = _get_cached_predict_all_raw(
+    # 1️⃣ Preview rows (LIMIT 10 ONLY)
+    preview_rows = _get_cached_predict_all_preview(
         datastore,
-        meterid=selected_meter,
-        utilities=selected_utilities or None
+        meterid=payload.get("meterid"),
+        utilities=payload.get("utility") or None
     )
 
-    if not predictions_list:
-        return jsonify({"ok": False, "error": "No cached predictions found"}), 404
+    preview_html = _render_prediction_preview_table(preview_rows, PREVIEW_ROW_LIMIT)
 
-    preview_html = _render_prediction_preview_table(predictions_list, PREVIEW_ROW_LIMIT)
+    # 2️⃣ Charts (already aggregated in SQL)
     historical_monthly = _collect_historical_monthly(
         as_of,
-        meterid=selected_meter,
-        utilities=selected_utilities  # optional, you'll need to add support in function
+        meterid=meterid,
+        utilities=utilities or None
     )
+
     forecast_monthly = _collect_forecast_monthly(
-        meterid=selected_meter,
-        utilities=selected_utilities  # optional
+        meterid=meterid,
+        utilities=utilities or None
     )
-    selected_utilities = payload.get("utility", [])
-    selected_meter = payload.get("meterid")
-    row_count = _get_cached_predict_all_count(datastore, meterid=selected_meter, utilities=selected_utilities)
+
+    # 3️⃣ Count (single integer)
+    row_count = _get_cached_predict_all_count(
+        datastore,
+        meterid=meterid,
+        utilities=utilities or None
+    )
+
+    # 4️⃣ Store ONE result bundle in memory
+    _set_dashboard_state({
+        "filters": {
+            "meterid": meterid,
+            "utilities": utilities,
+        },
+        "preview_rows": preview_rows,
+        "preview_html": preview_html,
+        "historical_monthly": historical_monthly,
+        "forecast_monthly": forecast_monthly,
+        "row_count": row_count,
+    })
+
     return jsonify({
         "ok": True,
         "row_count": row_count,
-        "preview_rows": min(PREVIEW_ROW_LIMIT, len(predictions_list)),
+        "preview_rows": len(preview_rows),
         "preview_html": preview_html,
         "as_of": as_of,
-        "scope": "all" if not selected_meter else "meter",
+        "scope": "all" if not meterid else "meter",
         "charts": {
             "historical": historical_monthly,
             "forecast": forecast_monthly,
@@ -561,117 +649,110 @@ def predictions_predict_all():
 
 
 
-def _get_cached_predict_all_preview(datastore, meterid: str | None = None, limit: int = PREVIEW_ROW_LIMIT):
+def _get_cached_predict_all_preview(
+    datastore,
+    meterid: str | None = None,
+    utilities: list[str] | None = None,
+    limit: int = PREVIEW_ROW_LIMIT,
+):
     _ensure_predict_all_cache_table(datastore)
 
-    if meterid:
-        sql = """
-            SELECT *
-            FROM predict_all_cache
-            WHERE meterid = ?
-            ORDER BY prediction_date
-            LIMIT ?
-        """
-        rows = datastore._con.execute(sql, [str(meterid), limit]).fetchall()
-    else:
-        sql = """
-            SELECT *
-            FROM predict_all_cache
-            ORDER BY meterid, prediction_date
-            LIMIT ?
-        """
-        rows = datastore._con.execute(sql, [limit]).fetchall()
+    sql = "SELECT * FROM predict_all_cache"
+    where_clauses = []
+    params: list[object] = []
 
+    if meterid is not None:
+        where_clauses.append("meterid = ?")
+        params.append(str(meterid))
+
+    if utilities:
+        placeholders = ", ".join("?" for _ in utilities)
+        where_clauses.append(f"utility IN ({placeholders})")
+        params.extend(utilities)
+
+    if where_clauses:
+        sql += " WHERE " + " AND ".join(where_clauses)
+
+    sql += " ORDER BY meterid, prediction_date LIMIT ?"
+    params.append(limit)
+
+    rows = datastore._con.execute(sql, params).fetchall()
     if not rows:
         return []
 
     cols = [d[0] for d in datastore._con.description]
     return [dict(zip(cols, r)) for r in rows]
-
 def predictions_predict_one():
-    """
-    Return predictions for a single meter using cached DuckDB table.
-    Includes full print-based debugging at each step.
-    """
-    print("=== predictions_predict_one START ===")
+    datastore = get_datastore()
+    as_of = PREDICT_ALL_AS_OF
 
-    # Step 0: Get JSON payload
     payload = request.get_json(silent=True) or {}
-    print(f"[DEBUG] Payload received: {payload}")
 
-    meterid = payload.get("meterid", None)
+    meterid = payload.get("meterid")
+    utilities = payload.get("utility") or []
+
     if meterid is None:
-        print("[WARN] No meterid provided in payload.")
         return jsonify({"ok": False, "error": "Select a meter"}), 400
 
     try:
         meterid = int(meterid)
     except ValueError:
-        print(f"[ERROR] Invalid meterid value: {meterid}")
         return jsonify({"ok": False, "error": "Meter ID must be an integer"}), 400
 
-    print(f"[INFO] Predict One called for meterid={meterid}")
+    # 1️⃣ Preview rows (LIMIT 10 ONLY)
+    preview_rows = _get_cached_predict_all_preview(
+        datastore,
+        meterid=meterid,
+        utilities=utilities or None,
+        limit=PREVIEW_ROW_LIMIT,
+    )
 
-    datastore = get_datastore()
+    preview_html = _render_prediction_preview_table(preview_rows, PREVIEW_ROW_LIMIT)
 
-    # Step 1: Fetch raw cached predictions
-    try:
-        predictions_list = _get_cached_predict_all_raw(datastore, meterid=meterid)
-        print(f"[DEBUG] Raw cached predictions fetched: {len(predictions_list)} rows")
-        print(f"[DEBUG] Sample of first 5 rows: {predictions_list[:5]}")
-    except Exception as e:
-        print(f"[ERROR] Error fetching cached predictions for meterid={meterid}: {e}")
-        return jsonify({"ok": False, "error": "Error fetching cached predictions"}), 500
+    # 2️⃣ Charts (aggregated in DuckDB)
+    historical_monthly = _collect_historical_monthly(
+        as_of,
+        meterid=meterid,
+        utilities=utilities or None,
+    )
 
-    if not predictions_list:
-        print(f"[WARN] No cached predictions found for meterid={meterid}")
-        return jsonify({"ok": False, "error": "No cached predictions found"}), 404
+    forecast_monthly = _collect_forecast_monthly(
+        meterid=meterid,
+        utilities=utilities or None,
+    )
 
-    # Step 2: Fetch historical monthly metrics
-    try:
-        as_of = PREDICT_ALL_AS_OF
-        historical_monthly = _collect_historical_monthly(as_of, meterid=meterid)
-        print(f"[DEBUG] Historical monthly data: {historical_monthly}")
-    except Exception as e:
-        print(f"[ERROR] Error fetching historical monthly data: {e}")
-        return jsonify({"ok": False, "error": "Error generating historical chart data"}), 500
+    historical_monthly_legacy = _convert_to_legacy_metrics(
+        historical_monthly, LEGACY_PREDICTION_OUTPUT_HISTORICAL
+    )
 
-    # Step 3: Fetch forecast monthly metrics
-    try:
-        forecast_monthly = _get_cached_predict_all_monthly(datastore, meterid=meterid)
-        print(f"[DEBUG] Forecast monthly data: {forecast_monthly}")
-    except Exception as e:
-        print(f"[ERROR] Error fetching forecast monthly data: {e}")
-        return jsonify({"ok": False, "error": "Error generating forecast chart data"}), 500
+    forecast_monthly_legacy = _convert_to_legacy_metrics(
+        forecast_monthly, LEGACY_PREDICTION_OUTPUT_FORECAST
+    )
 
-    # Step 4: Convert metrics to legacy format for charts
-    print("DEBUG historical_monthly keys:", historical_monthly[0].keys())
-    try:
-        historical_monthly_legacy = _convert_to_legacy_metrics(historical_monthly, LEGACY_PREDICTION_OUTPUT_HISTORICAL)
-        forecast_monthly_legacy   = _convert_to_legacy_metrics(forecast_monthly, LEGACY_PREDICTION_OUTPUT_FORECAST)
-        print(f"[DEBUG] Historical monthly legacy: {historical_monthly_legacy}")
-        print(f"[DEBUG] Forecast monthly legacy: {forecast_monthly_legacy}")
-    except Exception as e:
-        print(f"[ERROR] Error converting monthly metrics to legacy format: {e}")
-        return jsonify({"ok": False, "error": "Error converting chart data"}), 500
+    # 3️⃣ Count (single integer)
+    row_count = _get_cached_predict_all_count(
+        datastore,
+        meterid=str(meterid),
+        utilities=utilities or None,
+    )
 
-    # Step 5: Render preview table
-    try:
-        preview_html = _render_prediction_preview_table(predictions_list, PREVIEW_ROW_LIMIT)
-        print("[INFO] Preview HTML table rendered.")
-    except Exception as e:
-        print(f"[ERROR] Error rendering preview table: {e}")
-        return jsonify({"ok": False, "error": "Error generating preview table"}), 500
-    selected_utilities = payload.get("utility", [])
-    selected_meter = payload.get("meterid")
-    
-    row_count = _get_cached_predict_all_count(datastore, meterid=selected_meter, utilities=selected_utilities)
+    # 4️⃣ Store ONE dashboard state (optional but consistent)
+    _set_dashboard_state({
+        "filters": {
+            "meterid": meterid,
+            "utilities": utilities,
+        },
+        "preview_rows": preview_rows,
+        "preview_html": preview_html,
+        "historical_monthly": historical_monthly,
+        "forecast_monthly": forecast_monthly,
+        "row_count": row_count,
+    })
 
-    # Step 6: Construct response
-    response = {
+    return jsonify({
         "ok": True,
         "row_count": row_count,
-        "preview_rows": min(PREVIEW_ROW_LIMIT, len(predictions_list)),
+        "preview_rows": len(preview_rows),
         "preview_html": preview_html,
         "as_of": as_of,
         "meterid": meterid,
@@ -680,11 +761,8 @@ def predictions_predict_one():
             "historical": historical_monthly_legacy,
             "forecast": forecast_monthly_legacy,
         },
-    }
+    })
 
-    print(f"[INFO] Predict One response ready for meterid={meterid}")
-    print("=== predictions_predict_one END ===")
-    return jsonify(response)
 
 def _add_location_to_predictions(preds):
     # Ensure preds is a DataFrame
