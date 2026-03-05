@@ -11,6 +11,17 @@ logger = logging.getLogger("volta.upload")
 
 
 def _uploads_dir() -> Path:
+    glob_pat = current_app.config.get("CSV_GLOB", "data/*.csv")
+    p = Path(glob_pat)
+    uploads_dir = (p.parent if p.suffix else Path(glob_pat)).resolve()
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    return uploads_dir
+
+ALLOWED_EXTENSIONS = {"csv"}
+logger = logging.getLogger("volta.upload")
+
+
+def _uploads_dir() -> Path:
     glob_pat = current_app.config.get("CSV_GLOB", "data/uploads/*.csv")
     p = Path(glob_pat)
     return (p.parent if p.suffix else Path(glob_pat)).resolve()

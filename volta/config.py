@@ -21,6 +21,8 @@ class Config:
     # DuckDB database file (main store)
 
     # Location of incoming CSVs (from client uploads)
+    UPLOADS_DIR = Path.home() / "Downloads" / "volta" / "uploads"
+    CSV_GLOB = str(UPLOADS_DIR / "*.csv")
 
     # -------------------------
     # Data schema

@@ -1,0 +1,21 @@
+name: Heartbeat Call For Supabase
+
+on:
+  schedule:
+    - cron: "0 12 * * *" 
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Heartbeat call to Supabase
+        run: |
+          HEARTBEAT_URL="https://cskowfmadksybbtaiden.supabase.co/functions/v1/heartbeat"
+          echo "Pinging Supabase heartbeat function..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$HEARTBEAT_URL")
+          echo "HTTP status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Heartbeat failed!"
+            exit 1
+          fi
