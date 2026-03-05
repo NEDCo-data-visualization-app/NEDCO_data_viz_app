@@ -30,9 +30,9 @@ jobs:
           pip install pyinstaller python-dotenv
       - name: Create .env
         run: |
-          echo "BUCKET_URL=${BUCKET_URL}" > .env
-          echo "SUPABASE_KEY=${SUPABASE_KEY}" >> .env
+          echo "PARQUET_PATH=merged_sales_customers_clean" >> .env
           echo "PUBLIC_MODE=${PUBLIC_MODE}" >> .env
+          echo "DB_PATH=data/my_db.duckdb" >> .env
       - name: Build Mac executable
         run: |
           source .venv/bin/activate
@@ -42,6 +42,7 @@ jobs:
             --add-data "volta/templates:volta/templates" \
             --add-data "volta/static:volta/static" \
             --add-data ".env:." \
+            --add-data "data:./data" \  
             --copy-metadata duckdb \
             run.py
       - uses: actions/upload-artifact@v4
@@ -70,9 +71,9 @@ jobs:
           pip install pyinstaller python-dotenv
       - name: Create .env
         run: |
-          echo "BUCKET_URL=${BUCKET_URL}" > .env
-          echo "SUPABASE_KEY=${SUPABASE_KEY}" >> .env
+          echo "PARQUET_PATH=merged_sales_customers_clean" >> .env
           echo "PUBLIC_MODE=${PUBLIC_MODE}" >> .env
+          echo "DB_PATH=data/my_db.duckdb" >> .env
       - name: Build Mac executable
         run: |
           source .venv/bin/activate
@@ -82,6 +83,7 @@ jobs:
             --add-data "volta/templates:volta/templates" \
             --add-data "volta/static:volta/static" \
             --add-data ".env:." \
+            --add-data "data:./data" \  
             --copy-metadata duckdb \
             run.py
       - uses: actions/upload-artifact@v4
@@ -109,9 +111,9 @@ jobs:
           .\.venv\Scripts\python.exe -m pip install pyinstaller python-dotenv
       - name: Create .env
         run: |
-          echo "BUCKET_URL=${{ secrets.BUCKET_URL }}" > .env
-          echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> .env
+          echo "PARQUET_PATH=merged_sales_customers_clean" >> .env
           echo "PUBLIC_MODE=${PUBLIC_MODE}" >> .env
+          echo "DB_PATH=data/my_db.duckdb" >> .env
       - name: Build Windows executable
         run: |
           .\.venv\Scripts\python.exe -m PyInstaller `
@@ -120,6 +122,7 @@ jobs:
             --add-data "volta/templates;volta/templates" `
             --add-data "volta/static;volta/static" `
             --add-data ".env;." `
+            --add-data "data;data" ` 
             --copy-metadata duckdb `
             run.py
       - uses: actions/upload-artifact@v4
@@ -147,9 +150,9 @@ jobs:
           .\.venv\Scripts\python.exe -m pip install pyinstaller python-dotenv
       - name: Create .env
         run: |
-          echo "BUCKET_URL=${{ secrets.BUCKET_URL }}" > .env
-          echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> .env
+          echo "PARQUET_PATH=merged_sales_customers_clean" >> .env
           echo "PUBLIC_MODE=${PUBLIC_MODE}" >> .env
+          echo "DB_PATH=data/my_db.duckdb" >> .env
       - name: Build Windows executable
         run: |
           .\.venv\Scripts\python.exe -m PyInstaller `
@@ -158,6 +161,7 @@ jobs:
             --add-data "volta/templates;volta/templates" `
             --add-data "volta/static;volta/static" `
             --add-data ".env;." `
+            --add-data "data;data" ` 
             --copy-metadata duckdb `
             run.py
       - uses: actions/upload-artifact@v4
