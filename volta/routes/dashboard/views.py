@@ -17,6 +17,7 @@ import datetime
 from werkzeug.datastructures import ImmutableMultiDict
 from flask import request, render_template
 import pandas as pd
+import os
 tracemalloc.start()
 PREDICT_ALL_AS_OF = "2020-09-01"
 PREVIEW_ROW_LIMIT = 10
@@ -57,7 +58,7 @@ COLUMN_CLASS_MAP = {
 
 _CURRENT_DASHBOARD_STATE: dict | None = None
 
-MODE = False
+MODE = os.environ.get("PUBLIC_MODE", "False").lower() == "true"
 
 def _set_dashboard_state(state: dict):
     global _CURRENT_DASHBOARD_STATE
