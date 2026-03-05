@@ -42,7 +42,7 @@ jobs:
             --add-data "volta/templates:volta/templates" \
             --add-data "volta/static:volta/static" \
             --add-data ".env:." \
-            --add-data "data:./data" \  
+            --add-data "data:./data" \
             --copy-metadata duckdb \
             run.py
       - uses: actions/upload-artifact@v4
@@ -83,7 +83,7 @@ jobs:
             --add-data "volta/templates:volta/templates" \
             --add-data "volta/static:volta/static" \
             --add-data ".env:." \
-            --add-data "data:./data" \  
+            --add-data "data:./data" \
             --copy-metadata duckdb \
             run.py
       - uses: actions/upload-artifact@v4
@@ -122,7 +122,7 @@ jobs:
             --add-data "volta/templates;volta/templates" `
             --add-data "volta/static;volta/static" `
             --add-data ".env;." `
-            --add-data "data;data" ` 
+            --add-data "data;data" `
             --copy-metadata duckdb `
             run.py
       - uses: actions/upload-artifact@v4
@@ -161,7 +161,7 @@ jobs:
             --add-data "volta/templates;volta/templates" `
             --add-data "volta/static;volta/static" `
             --add-data ".env;." `
-            --add-data "data;data" ` 
+            --add-data "data;data" `
             --copy-metadata duckdb `
             run.py
       - uses: actions/upload-artifact@v4
