@@ -7,7 +7,6 @@ on:
   workflow_dispatch: 
 
 jobs:
-  # macOS public
   build-macos-public:
     runs-on: macos-latest
     env:
