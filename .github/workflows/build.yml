@@ -13,7 +13,7 @@ jobs:
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      PUBLIC_MODE: true
+      PUBLIC_MODE: True
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,7 +32,7 @@ jobs:
         run: |
           echo "PARQUET_PATH=merged_sales_customers_clean" >> .env
           echo "PUBLIC_MODE=${PUBLIC_MODE}" >> .env
-          echo "DB_PATH=data/my_db.duckdb" >> .env
+          echo "DB_PATH=data/warehouse_new.duckdb" >> .env
       - name: Build Mac executable
         run: |
           source .venv/bin/activate
@@ -56,7 +56,7 @@ jobs:
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      PUBLIC_MODE: false
+      PUBLIC_MODE: False
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -73,7 +73,7 @@ jobs:
         run: |
           echo "PARQUET_PATH=merged_sales_customers_clean" >> .env
           echo "PUBLIC_MODE=${PUBLIC_MODE}" >> .env
-          echo "DB_PATH=data/my_db.duckdb" >> .env
+          echo "DB_PATH=data/warehouse_new.duckdb" >> .env
       - name: Build Mac executable
         run: |
           source .venv/bin/activate
@@ -97,7 +97,7 @@ jobs:
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      PUBLIC_MODE: true
+      PUBLIC_MODE: True
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -113,7 +113,7 @@ jobs:
         run: |
           echo "PARQUET_PATH=merged_sales_customers_clean" >> .env
           echo "PUBLIC_MODE=${PUBLIC_MODE}" >> .env
-          echo "DB_PATH=data/my_db.duckdb" >> .env
+          echo "DB_PATH=data/warehouse_new.duckdb" >> .env
       - name: Build Windows executable
         run: |
           .\.venv\Scripts\python.exe -m PyInstaller `
@@ -136,7 +136,7 @@ jobs:
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      PUBLIC_MODE: false
+      PUBLIC_MODE: False
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -152,7 +152,7 @@ jobs:
         run: |
           echo "PARQUET_PATH=merged_sales_customers_clean" >> .env
           echo "PUBLIC_MODE=${PUBLIC_MODE}" >> .env
-          echo "DB_PATH=data/my_db.duckdb" >> .env
+          echo "DB_PATH=data/warehouse_new.duckdb" >> .env
       - name: Build Windows executable
         run: |
           .\.venv\Scripts\python.exe -m PyInstaller `
