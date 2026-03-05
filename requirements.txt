@@ -9,5 +9,5 @@ matplotlib
 openpyxl
 xlrd
 joblib
-lightgbm==3.3.5
+lightgbm
 db-dtypes
