@@ -53,6 +53,16 @@
   </div>
 {%- endmacro %}
 
+{% macro stat_tile(label, value, sub=None, small=False) -%}
+  <div class="card stat-tile">
+    <div class="card-body py-3">
+      <div class="stat-label">{{ label }}</div>
+      <div class="stat-value{% if small %} fs-6{% endif %}">{{ value }}</div>
+      {% if sub %}<div class="stat-sub">{{ sub }}</div>{% endif %}
+    </div>
+  </div>
+{%- endmacro %}
+
 {% macro stat_box(title, value) -%}
   <div class="col-6 col-md-4 col-xl-2">
     <div class="p-2 bg-light rounded">

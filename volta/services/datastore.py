@@ -61,6 +61,7 @@ class DataStore:
         self._apply_resource_limits()
         self._lock = threading.RLock()
         self._columns: Optional[List[str]] = None
+        self._extent: Optional[Dict[str, Any]] = None
         logger.info("DuckDB opened at %s (table %s)", self.db_path, self.table)
 
     def _apply_resource_limits(self) -> None:
@@ -100,6 +101,24 @@ class DataStore:
 
     def invalidate(self) -> None:
         self._columns = None
+        self._extent = None
+
+    def data_extent(self) -> Dict[str, Any]:
+        """Row count and date span of the dataset, cached until the data changes."""
+        if self._extent is None:
+            extent: Dict[str, Any] = {"rows": 0, "date_min": None, "date_max": None, "date_max_label": ""}
+            if self.date_col in self.get_columns():
+                row = self.fetch_one(
+                    f"SELECT COUNT(*) AS n, MIN({self.date_col}) AS dmin, MAX({self.date_col}) AS dmax FROM {self.table_sql}"
+                )
+                if row and row.get("n"):
+                    extent.update(rows=int(row["n"]), date_min=row["dmin"], date_max=row["dmax"])
+                    try:
+                        extent["date_max_label"] = row["dmax"].strftime("%b %Y")
+                    except AttributeError:
+                        extent["date_max_label"] = str(row["dmax"])
+            self._extent = extent
+        return dict(self._extent)
 
     def get_columns(self) -> List[str]:
         if self._columns is None:

@@ -1,15 +1,25 @@
 {% extends "base.html" %}
+{% block title %}Update data · NEDCo Customer Dashboard{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center mt-5">
+<div class="row justify-content-center mt-4">
   <div class="col-12 col-md-6 col-lg-4">
-    <div class="card shadow-sm">
+    <div class="card">
       <div class="card-body">
-        <h5 class="card-title mb-2">No data loaded</h5>
-        <p class="text-muted small">
-          The dashboard has no dataset yet. Upload a CSV export, or fetch the latest
-          dataset if an internet connection and a remote source are available.
-        </p>
+        {% if data_extent and data_extent.rows %}
+          <h5 class="card-title mb-2">Update data</h5>
+          <p class="text-muted small">
+            The dataset currently holds {{ "{:,}".format(data_extent.rows) }} transactions through
+            {{ data_extent.date_max_label }}. Upload a CSV export to add newer rows; rows already
+            present are skipped.
+          </p>
+        {% else %}
+          <h5 class="card-title mb-2">No data loaded</h5>
+          <p class="text-muted small">
+            The dashboard has no dataset yet. Upload a CSV export, or fetch the latest
+            dataset if an internet connection and a remote source are available.
+          </p>
+        {% endif %}
 
         {% if admin_token_required %}
         <div class="mb-3">

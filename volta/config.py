@@ -155,8 +155,8 @@ class Config:
 
     METRICS: Dict[str, str] = {
         "ocd_energy": "Energy (kWh)",
-        "ocd_paymoney": "Paymoney",
-        "ocd_cash_received": "Cash Received (GHC)",
+        "ocd_paymoney": "Amount paid (GH₵)",
+        "ocd_cash_received": "Cash received (GH₵)",
     }
 
 

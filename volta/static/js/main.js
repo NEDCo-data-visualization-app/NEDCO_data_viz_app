@@ -2,6 +2,7 @@ import { initCharts } from './charts/initCharts.js';
 import { initLiveFilters } from './filters/liveFiltersController.js';
 import { initFilterSearch } from './filters/filterSearch.js';
 import { initMeteridDynamic } from './filters/meteridDynamic.js';
+import { initFilterSummary } from './filters/filterSummary.js';
 import { initPredictionFilters } from './predictions/initPredictionFilters.js';
 import { initPredictionActions } from './predictions/predictionActions.js';
 import { initPredictionCharts } from './predictions/predictionCharts.js';
@@ -18,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initLiveFilters();
   initFilterSearch();
   initMeteridDynamic();
+  initFilterSummary();
   initPredictionFilters();
   initPredictionCharts();
   initPredictionActions();

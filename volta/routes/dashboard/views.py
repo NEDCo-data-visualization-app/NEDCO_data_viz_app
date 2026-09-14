@@ -22,18 +22,24 @@ from .helpers import DEFAULT_METERID_LIMIT, build_params, build_unique_values
 PREVIEW_ROW_LIMIT = 10
 SENSITIVE_COLUMNS = {"meterid", "customer_no"}
 NUMERIC_PREDICTION_COLUMNS = {"paymoney_pred", "energy_pred", "cash_pred"}
+PREVIEW_COLUMN_ORDER = [
+    "od_date", "prediction_date", "horizon", "utility", "tariff_type",
+    "ocd_energy", "ocd_paymoney", "ocd_cash_received", "energy_pred", "paymoney_pred", "cash_pred",
+    "meterid", "customer_no", "as_of",
+]
 
 COLUMN_LABELS = {
     "meterid": "Meter ID",
-    "customer_no": "Customer No.",
-    "utility": "Location",
-    "tariff_type": "Account Type",
-    "as_of": "As Of",
-    "prediction_date": "Forecast Month",
-    "horizon": "Horizon (Months Ahead)",
+    "customer_no": "Customer no.",
+    "od_date": "Date",
+    "utility": "District",
+    "tariff_type": "Account type",
+    "as_of": "As of",
+    "prediction_date": "Forecast month",
+    "horizon": "Months ahead",
     "energy_pred": "Energy (kWh)",
-    "cash_pred": "Cash Received (GHC)",
-    "paymoney_pred": "Paymoney",
+    "cash_pred": "Cash received (GH₵)",
+    "paymoney_pred": "Amount paid (GH₵)",
 }
 
 COLUMN_CLASSES = {
@@ -93,6 +99,7 @@ def _render_preview_table(rows: List[Dict[str, Any]], limit: int = PREVIEW_ROW_L
         return ""
 
     columns = [c for c in rows[0].keys() if not (is_public and c.lower() in SENSITIVE_COLUMNS)]
+    columns = sorted(columns, key=lambda c: (PREVIEW_COLUMN_ORDER.index(c) if c in PREVIEW_COLUMN_ORDER else len(PREVIEW_COLUMN_ORDER)))
     labels = dict(COLUMN_LABELS)
     labels.update(get_metrics().mapping)
 

@@ -1,0 +1,16 @@
+{% if summary and summary.rows %}
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    {{ ui.stat_tile('Customers', "{:,}".format(summary.meters), 'meters with at least one purchase') }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ ui.stat_tile('Districts', "{:,}".format(summary.locations), 'with transactions in this period') }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ ui.stat_tile('Transactions', "{:,}".format(summary.rows), 'prepaid purchases') }}
+  </div>
+  <div class="col-6 col-lg-3">
+    {{ ui.stat_tile('Period', summary.date_min ~ ' to ' ~ summary.date_max, 'first and last transaction', small=true) }}
+  </div>
+</div>
+{% endif %}

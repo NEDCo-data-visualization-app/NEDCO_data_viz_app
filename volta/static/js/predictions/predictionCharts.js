@@ -1,3 +1,5 @@
+import { palette, applyChartTheme, valueAxis, categoryAxis } from '../charts/theme.js';
+
 const chartInstances = {};
 const chartModes = {
   kwh: 'combined',
@@ -135,10 +137,10 @@ function buildKwhConfig(data, mode) {
   if (mode === 'combined') {
     const historicalData = mapMetricValues(monthKeys, historicalMap, 'kwh');
     datasets.push({
-      label: 'kWh (historical)',
+      label: 'Energy (history)',
       data: historicalData,
-      borderColor: '#0d6efd',
-      backgroundColor: '#0d6efd',
+      borderColor: palette.blue,
+      backgroundColor: palette.blue,
       borderWidth: 2,
       tension: 0.3,
       pointRadius: 2,
@@ -149,10 +151,10 @@ function buildKwhConfig(data, mode) {
 
   const forecastData = mapMetricValues(monthKeys, forecastMap, 'kwh');
   datasets.push({
-    label: mode === 'combined' ? 'kWh (forecast)' : 'kWh forecast',
+    label: mode === 'combined' ? 'Energy (forecast)' : 'Energy forecast',
     data: forecastData,
-    borderColor: '#0d6efd',
-    backgroundColor: '#0d6efd',
+    borderColor: palette.blue,
+    backgroundColor: palette.blue,
     borderWidth: 2,
     borderDash: [6, 3],
     tension: 0.3,
@@ -170,14 +172,8 @@ function buildKwhConfig(data, mode) {
     labels,
     datasets: filtered,
     scales: {
-      x: {
-        title: { display: true, text: 'Month' },
-        ticks: { maxTicksLimit: 12 }
-      },
-      y: {
-        title: { display: true, text: 'kWh' },
-        beginAtZero: true
-      }
+      x: categoryAxis('Month'),
+      y: valueAxis('kWh')
     }
   };
 }
@@ -207,61 +203,57 @@ function buildPaymentsConfig(data, mode) {
   if (mode === 'combined') {
     const paymoneyHist = mapMetricValues(monthKeys, historicalMap, 'paymoney');
     datasets.push({
-      label: 'Paymoney (historical)',
+      label: 'Amount paid (history)',
       data: paymoneyHist,
-      borderColor: '#0d6efd',
-      backgroundColor: '#0d6efd',
+      borderColor: palette.blue,
+      backgroundColor: palette.blue,
       borderWidth: 2,
       tension: 0.3,
       pointRadius: 2,
       spanGaps: false,
       fill: false,
-      yAxisID: 'paymoney'
     });
 
     const ghcHist = mapMetricValues(monthKeys, historicalMap, 'ghc');
     datasets.push({
-      label: 'Cash Received (historical)',
+      label: 'Cash received (history)',
       data: ghcHist,
-      borderColor: '#198754',
-      backgroundColor: '#198754',
+      borderColor: palette.red,
+      backgroundColor: palette.red,
       borderWidth: 2,
       tension: 0.3,
       pointRadius: 2,
       spanGaps: false,
       fill: false,
-      yAxisID: 'ghc'
     });
   }
 
   const paymoneyForecast = mapMetricValues(monthKeys, forecastMap, 'paymoney');
   datasets.push({
-    label: mode === 'combined' ? 'Paymoney (forecast)' : 'Paymoney forecast',
+    label: mode === 'combined' ? 'Amount paid (forecast)' : 'Amount paid forecast',
     data: paymoneyForecast,
-    borderColor: '#0d6efd',
-    backgroundColor: '#0d6efd',
+    borderColor: palette.blue,
+    backgroundColor: palette.blue,
     borderWidth: 2,
     borderDash: [6, 3],
     tension: 0.3,
     pointRadius: 2,
     spanGaps: false,
     fill: false,
-    yAxisID: 'paymoney'
   });
 
   const ghcForecast = mapMetricValues(monthKeys, forecastMap, 'ghc');
   datasets.push({
-    label: mode === 'combined' ? 'Cash Received (forecast)' : 'Cash Received forecast',
+    label: mode === 'combined' ? 'Cash received (forecast)' : 'Cash received forecast',
     data: ghcForecast,
-    borderColor: '#198754',
-    backgroundColor: '#198754',
+    borderColor: palette.red,
+    backgroundColor: palette.red,
     borderWidth: 2,
     borderDash: [6, 3],
     tension: 0.3,
     pointRadius: 2,
     spanGaps: false,
     fill: false,
-    yAxisID: 'ghc'
   });
 
   const filtered = filterEmptyDatasets(datasets);
@@ -273,23 +265,8 @@ function buildPaymentsConfig(data, mode) {
     labels,
     datasets: filtered,
     scales: {
-      x: {
-        title: { display: true, text: 'Month' },
-        ticks: { maxTicksLimit: 12 }
-      },
-      paymoney: {
-        type: 'linear',
-        position: 'left',
-        title: { display: true, text: 'Paymoney (GHC)' },
-        beginAtZero: true
-      },
-      ghc: {
-        type: 'linear',
-        position: 'right',
-        title: { display: true, text: 'Cash Received (GHC)' },
-        grid: { drawOnChartArea: false },
-        beginAtZero: true
-      }
+      x: categoryAxis('Month'),
+      y: valueAxis('GH₵')
     }
   };
 }
@@ -317,6 +294,7 @@ function renderChart(key) {
 }
 
 export function initPredictionCharts() {
+  applyChartTheme();
   document.querySelectorAll('[data-chart-mode-toggle]').forEach((group) => {
     const chartKey = group.getAttribute('data-chart-mode-toggle');
     if (!chartKey) return;

@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{% block title %}VoltaV Dashboard{% endblock %}</title>
+    <title>{% block title %}NEDCo Customer Dashboard{% endblock %}</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}" />
+    <link rel="icon" type="image/png" sizes="64x64" href="{{ url_for('static', filename='img/favicon-64.png') }}" />
 
     <!-- All assets are served locally so the app works without internet access -->
     <link href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}" rel="stylesheet" />
@@ -11,15 +13,49 @@
     {% block head_extra %}{% endblock %}
   </head>
   <body>
-    <div class="container-fluid py-3">
-      {% if show_logout %}
-        <form method="POST" action="{{ url_for('auth.logout') }}" class="d-flex justify-content-end align-items-center gap-2 mb-2">
-          <span class="badge rounded-pill text-bg-{{ 'warning' if private_session else 'secondary' }}">
-            {{ 'Private view' if private_session else 'Public view' }}
-          </span>
-          <button class="btn btn-link btn-sm text-decoration-none" type="submit">Sign out</button>
-        </form>
-      {% endif %}
+    {% set on_overview = request.endpoint in ('dashboard.index', 'dashboard.public_dashboard', 'dashboard.reset_dashboard') %}
+    {% set on_forecasts = request.endpoint in ('dashboard.predictions_public', 'dashboard.predictions_private') %}
+    <nav class="navbar navbar-expand-md nedco-nav" aria-label="Main navigation">
+      <div class="container-fluid px-3 px-lg-4">
+        <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('dashboard.index') }}">
+          <img src="{{ url_for('static', filename='img/nedco.png') }}" alt="NEDCo logo" />
+          <span class="brand-text">Customer Dashboard<span class="brand-sub">Northern Electricity Distribution Company</span></span>
+        </a>
+        {% if not login_gate_active %}
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav"
+                aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="mainNav">
+          <ul class="navbar-nav me-auto ms-md-3">
+            <li class="nav-item"><a class="nav-link{{ ' active' if on_overview }}" href="{{ url_for('dashboard.index') }}">Overview</a></li>
+            <li class="nav-item">
+              <a class="nav-link{{ ' active' if on_forecasts }}"
+                 href="{{ url_for('dashboard.predictions_public' if is_public else 'dashboard.predictions_private') }}">Forecasts</a>
+            </li>
+            {% if not is_public %}
+            <li class="nav-item"><a class="nav-link{{ ' active' if request.endpoint == 'upload.upload_file' }}" href="{{ url_for('upload.upload_file') }}">Update data</a></li>
+            {% endif %}
+          </ul>
+          <div class="d-flex flex-wrap align-items-center gap-3 nav-meta">
+            {% if data_extent and data_extent.date_max_label %}
+              <span title="Latest transaction date in the dataset">Data through {{ data_extent.date_max_label }}</span>
+            {% endif %}
+            {% if show_logout %}
+              <span class="badge rounded-pill text-bg-{{ 'warning' if private_session else 'light' }}">
+                {{ 'Private view' if private_session else 'Public view' }}
+              </span>
+              <form method="POST" action="{{ url_for('auth.logout') }}" class="d-inline">
+                <button class="btn btn-link btn-sm p-0 text-decoration-none" type="submit">Sign out</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </nav>
+
+    <main class="container-fluid px-3 px-lg-4 py-4">
       {% if flashes %}
         {% for category, message in flashes %}
           <div class="alert alert-{{ category or 'info' }} alert-dismissible fade show" role="alert">
@@ -29,7 +65,11 @@
         {% endfor %}
       {% endif %}
       {% block content %}{% endblock %}
-    </div>
+    </main>
+
+    <footer class="page-footer text-center py-3 mt-4">
+      Northern Electricity Distribution Company &middot; Customer Dashboard
+    </footer>
 
     <script src="{{ url_for('static', filename='vendor/bootstrap.bundle.min.js') }}" defer></script>
     <script src="{{ url_for('static', filename='vendor/chart.umd.js') }}"></script>

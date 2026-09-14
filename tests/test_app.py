@@ -299,6 +299,28 @@ def test_upload_accepts_legacy_shiny_export(tmp_path):
     assert b"Meter ID" in client.get("/").data
 
 
+def test_branding_and_layout(client):
+    page = client.get("/").get_data(as_text=True)
+    assert 'img/nedco.png' in page and 'alt="NEDCo logo"' in page
+    assert "Data through Sep 2020" in page  # synthetic data ends 2020-09-15
+    assert page.count('class="btn-check metric-checkbox"') == 3  # one metric at a time
+    assert 'id="lineChartTotal"' in page and 'id="barChart"' in page and 'id="pieChart"' in page
+    assert 'id="lineChart"' not in page  # the per-transaction mean chart is gone
+    assert "Customers" in page and "Transactions" in page  # KPI tiles
+    assert "District" in page and "Account type" in page
+    assert client.get("/static/img/favicon-32.png").status_code == 200
+    assert client.get("/static/js/charts/theme.js").status_code == 200
+
+
+def test_data_extent_updates_after_upload(tmp_path):
+    client = _make_app(tmp_path, with_data=False).test_client()
+    assert "Data through" not in client.get("/").get_data(as_text=True)
+    rows = _synthetic_rows(n_meters=2, start=dt.date(2021, 3, 1), end=dt.date(2021, 5, 20))
+    client.post("/upload", data={"file": (io.BytesIO(_csv_bytes(rows)), "b.csv")},
+                content_type="multipart/form-data", follow_redirects=True)
+    assert "Data through May 2021" in client.get("/").get_data(as_text=True)
+
+
 def test_duckdb_resource_limits_are_applied(tmp_path):
     app = create_app(
         {"DB_PATH": str(tmp_path / "w.duckdb"), "PARQUET_PATH": TABLE, "TESTING": True,

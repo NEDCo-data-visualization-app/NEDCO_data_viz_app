@@ -1,4 +1,119 @@
-.sticky { position: sticky; top: 1rem; }
-.filter-wrap { max-height: 220px; overflow: auto; border: 1px solid #e9ecef; border-radius: .5rem; padding: .5rem; }
-.filter-wrap label { display:block; }
-.chart-box { height: 280px; }
+/* NEDCo Customer Dashboard theme.
+   Brand colours come from the NEDCo logo; the categorical chart palette
+   (blue, red, sky, gold) was validated for colour-vision safety on white. */
+:root {
+  --nedco-navy: #0b2545;
+  --nedco-blue: #0060a8;
+  --nedco-blue-dark: #004b85;
+  --nedco-sky: #0098d8;
+  --nedco-red: #c8391f;
+  --nedco-gold: #e0a000;
+
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-muted: #898781;
+  --surface: #ffffff;
+  --plane: #f3f5f8;
+  --hairline: #e1e0d9;
+  --border: rgba(11, 11, 11, 0.10);
+
+  --bs-body-bg: var(--plane);
+  --bs-body-color: var(--ink);
+  --bs-body-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --bs-primary: var(--nedco-blue);
+  --bs-primary-rgb: 0, 96, 168;
+  --bs-link-color: var(--nedco-blue);
+  --bs-link-color-rgb: 0, 96, 168;
+  --bs-link-hover-color: var(--nedco-blue-dark);
+  --bs-link-hover-color-rgb: 0, 75, 133;
+  --bs-border-color: var(--hairline);
+  --bs-secondary-color: var(--ink-2);
+}
+
+body { background: var(--plane); color: var(--ink); }
+h1, h2, h3, h4, h5, h6 { color: var(--nedco-navy); }
+
+/* ---------- Buttons & forms ---------- */
+.btn-primary {
+  --bs-btn-bg: var(--nedco-blue); --bs-btn-border-color: var(--nedco-blue);
+  --bs-btn-hover-bg: var(--nedco-blue-dark); --bs-btn-hover-border-color: var(--nedco-blue-dark);
+  --bs-btn-active-bg: var(--nedco-blue-dark); --bs-btn-active-border-color: var(--nedco-blue-dark);
+  --bs-btn-disabled-bg: #7fa9cf; --bs-btn-disabled-border-color: #7fa9cf;
+  --bs-btn-focus-shadow-rgb: 0, 96, 168;
+}
+.btn-outline-primary {
+  --bs-btn-color: var(--nedco-blue); --bs-btn-border-color: #b9cfe3;
+  --bs-btn-hover-bg: #e8f1f9; --bs-btn-hover-color: var(--nedco-blue-dark); --bs-btn-hover-border-color: var(--nedco-blue);
+  --bs-btn-active-bg: var(--nedco-blue); --bs-btn-active-border-color: var(--nedco-blue); --bs-btn-active-color: #fff;
+  --bs-btn-focus-shadow-rgb: 0, 96, 168;
+}
+.btn-outline-secondary {
+  --bs-btn-color: var(--ink-2); --bs-btn-border-color: #cfd4da;
+  --bs-btn-hover-bg: #eef1f4; --bs-btn-hover-color: var(--ink); --bs-btn-hover-border-color: #b9c0c8;
+}
+.form-control, .form-select { border-color: #cfd4da; }
+.form-control:focus, .form-select:focus {
+  border-color: var(--nedco-sky);
+  box-shadow: 0 0 0 0.2rem rgba(0, 96, 168, 0.15);
+}
+.form-check-input:checked { background-color: var(--nedco-blue); border-color: var(--nedco-blue); }
+.form-check-input:focus { border-color: var(--nedco-sky); box-shadow: 0 0 0 0.2rem rgba(0, 96, 168, 0.15); }
+.form-label { color: var(--ink-2); }
+.bg-primary-subtle { background-color: #e8f1f9 !important; }
+.accordion-button:not(.collapsed) { background-color: #e8f1f9; color: var(--nedco-navy); box-shadow: none; }
+.accordion-button:focus { box-shadow: 0 0 0 0.2rem rgba(0, 96, 168, 0.15); border-color: var(--nedco-sky); }
+.alert-info { --bs-alert-bg: #e8f1f9; --bs-alert-border-color: #b9cfe3; --bs-alert-color: var(--nedco-navy); }
+
+/* ---------- Navigation ---------- */
+.nedco-nav { background: var(--nedco-navy); padding-top: .55rem; padding-bottom: .55rem; }
+.nedco-nav .navbar-brand { color: #fff; font-weight: 600; letter-spacing: .01em; }
+.nedco-nav .navbar-brand img { height: 40px; width: auto; background: #fff; border-radius: 6px; padding: 3px; }
+.nedco-nav .brand-text { font-size: 1.05rem; }
+.nedco-nav .brand-sub { display: block; font-size: .72rem; font-weight: 400; color: rgba(255,255,255,.7); line-height: 1.1; }
+.nedco-nav .nav-link { color: rgba(255, 255, 255, 0.78); padding: .55rem .9rem; border-bottom: 2px solid transparent; }
+.nedco-nav .nav-link:hover, .nedco-nav .nav-link:focus { color: #fff; }
+.nedco-nav .nav-link.active { color: #fff; border-bottom-color: var(--nedco-sky); }
+.nedco-nav .navbar-toggler { border-color: rgba(255,255,255,.35); }
+.nedco-nav .navbar-toggler-icon { filter: invert(1); }
+.nedco-nav .nav-meta { color: rgba(255, 255, 255, 0.75); font-size: .85rem; }
+.nedco-nav .btn-link { color: #fff; }
+.nedco-nav .badge { font-weight: 500; }
+.page-footer { color: var(--ink-muted); font-size: .8rem; border-top: 1px solid var(--hairline); }
+
+/* ---------- Cards ---------- */
+.card { border: 1px solid var(--border); border-radius: .6rem; box-shadow: none; background: var(--surface); }
+.card-header { background: transparent; border-bottom: 1px solid var(--hairline); font-weight: 600; color: var(--nedco-navy); }
+.card-title { color: var(--nedco-navy); font-weight: 600; }
+.chart-title { font-size: 1rem; font-weight: 600; color: var(--nedco-navy); margin-bottom: .1rem; }
+.chart-subtitle { font-size: .8rem; color: var(--ink-2); margin-bottom: .75rem; }
+.chart-box { position: relative; height: 300px; transition: opacity .15s ease; }
+.chart-box.is-loading { opacity: .45; }
+.chart-box .chart-empty {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--ink-muted); font-size: .9rem; text-align: center; padding: 1rem;
+}
+.chart-actions { display: flex; justify-content: flex-end; margin-top: .5rem; }
+
+/* ---------- Stat tiles ---------- */
+.stat-tile { height: 100%; }
+.stat-tile .stat-label { font-size: .8rem; color: var(--ink-2); margin-bottom: .15rem; }
+.stat-tile .stat-value { font-size: 1.65rem; font-weight: 600; color: var(--nedco-navy); line-height: 1.15; }
+.stat-tile .stat-sub { font-size: .78rem; color: var(--ink-muted); margin-top: .15rem; }
+
+/* ---------- Filters ---------- */
+.filter-bar .form-label { font-size: .78rem; margin-bottom: .2rem; }
+.filter-menu { min-width: 300px; padding: .75rem; box-shadow: 0 8px 24px rgba(11, 37, 69, .12); border-color: var(--border); }
+.filter-toggle { position: relative; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.filter-wrap { max-height: 240px; overflow: auto; border: 1px solid var(--hairline); border-radius: .4rem; padding: .35rem .5rem; }
+.filter-item { display: flex; align-items: center; gap: .5rem; padding: .18rem .1rem; font-size: .9rem; cursor: pointer; }
+.filter-item input { margin: 0; accent-color: var(--nedco-blue); }
+
+/* ---------- Tables ---------- */
+.table { --bs-table-striped-bg: #f7f9fb; --bs-table-hover-bg: #eef3f8; font-size: .875rem; }
+.table thead th { color: var(--ink-2); font-weight: 600; border-bottom-color: var(--hairline); white-space: nowrap; }
+.table-light { --bs-table-bg: #f3f5f8; }
+.tabular { font-variant-numeric: tabular-nums; }
+.stats-table td, .stats-table th { padding: .5rem .75rem; }
+
+/* ---------- Auth pages ---------- */
+.auth-logo { height: 96px; width: auto; }
