@@ -19,7 +19,7 @@ from .routes.auth import (
     require_viewer_login,
 )
 from .routes.dashboard import bp as dashboard_bp
-from .routes.dashboard import aggregates, charts, downloads, filters, health, meterid, views  # noqa: F401 - registers routes
+from .routes.dashboard import aggregates, charts, customers, downloads, filters, health, meterid, views  # noqa: F401 - registers routes
 from .routes.upload import upload_bp
 from .services.datastore import DataStore
 from .services.kpis import fmt_compact, fmt_full

@@ -421,3 +421,103 @@ def test_previous_period_window_rules():
     assert prev(dt.date(2019, 10, 1), dt.date(2020, 9, 12)) == (dt.date(2018, 10, 1), dt.date(2019, 9, 12))
     # Arbitrary ranges shift by their own length in days.
     assert prev(dt.date(2020, 3, 10), dt.date(2020, 3, 19)) == (dt.date(2020, 2, 29), dt.date(2020, 3, 9))
+
+
+# ----------------------------------------------------------- customer lookup
+def _make_app_with_details(tmp_path, dormant_meter_end=dt.date(2019, 6, 1)):
+    """Synthetic data plus customer attribute columns and one meter that stopped buying."""
+    rows = _synthetic_rows()
+    dormant = _synthetic_rows(n_meters=1, start=dt.date(2018, 1, 5), end=dormant_meter_end)
+    for r in dormant:
+        r["meterid"], r["customer_no"], r["utility"], r["tariff_type"] = "11019999999", "501009999999", "Techiman", "Residential"
+    rows += dormant
+    df = pd.DataFrame(rows)
+    df["customer_name"] = ["Ama Mensah" if m == "11010000001" else None for m in df["meterid"]]
+    df["phone_number"] = ["0244000000" if m == "11010000001" else None for m in df["meterid"]]
+    db = tmp_path / "warehouse.duckdb"
+    con = duckdb.connect(str(db))
+    con.register("df", df)
+    con.execute(f"CREATE TABLE {TABLE} AS SELECT * EXCLUDE (od_date), od_date::DATE AS od_date FROM df")
+    con.close()
+    return create_app({"DB_PATH": str(db), "PARQUET_PATH": TABLE, "PUBLIC_MODE": False,
+                       "UPLOADS_DIR": str(tmp_path / "uploads"), "MODEL_DIR": str(ROOT / "models"), "TESTING": True})
+
+
+def test_customer_search_and_redirect(client):
+    page = client.get("/customers?q=1101").get_data(as_text=True)
+    assert page.count('href="/customers/1101') == 20  # every synthetic meter matches
+    assert "20 matches" in page
+    by_customer_no = client.get("/customers?q=501001000003").get_data(as_text=True)
+    assert 'href="/customers/11010000003"' in by_customer_no and "1 match" in by_customer_no
+    r = client.get("/customers?q=11010000001")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/customers/11010000001")
+    assert "No meter or customer number contains" in client.get("/customers?q=42424242").get_data(as_text=True)
+    assert client.get("/customers/does-not-exist").status_code == 404
+
+
+def test_customer_account_page(tmp_path):
+    client = _make_app_with_details(tmp_path).test_client()
+    page = client.get("/customers/11010000001").get_data(as_text=True)
+    assert "Meter number" in page and "11010000001" in page and "501001000001" in page
+    assert "Ama Mensah" in page and "0244000000" in page and "Customer name" in page  # attribute columns
+    assert "Last 12 months" in page and "Energy bought" in page and "Versus similar customers" in page
+    assert 'id="accountSeries"' in page and '"peer_kwh"' in page
+    assert "Nothing to flag" in page and 'class="badge rounded-pill status-active"' in page
+    assert 'href="/download-csv?meterid=11010000001"' in page
+    assert "Customers</a>" in page  # nav link in the private view
+    # All history extends the series back to the first purchase.
+    short = client.get("/customers/11010000001").get_data(as_text=True)
+    long = client.get("/customers/11010000001?history=all").get_data(as_text=True)
+    assert '"2018-01"' in long and '"2018-01"' not in short
+
+
+def test_customer_signals_flag_a_dormant_meter(tmp_path):
+    client = _make_app_with_details(tmp_path).test_client()
+    page = client.get("/customers/11019999999").get_data(as_text=True)
+    assert 'status-inactive' in page and "No purchases for 16 months" in page
+    assert "No purchases in the last 12 months of data" in page
+
+
+def test_customer_pages_are_private_only(tmp_path):
+    public = _make_app(tmp_path, public=True).test_client()
+    assert public.get("/customers").status_code == 403
+    assert public.get("/customers/11010000001").status_code == 403
+    assert "Customers</a>" not in public.get("/").get_data(as_text=True)
+    assert 'href="/customers/' not in public.get("/").get_data(as_text=True)
+    (tmp_path / "p").mkdir()
+    private = _make_app(tmp_path / "p").test_client()
+    assert 'href="/customers/11010' in private.get("/").get_data(as_text=True)  # preview links to accounts
+
+
+def test_public_export_and_preview_hide_identifiers_and_attributes(tmp_path):
+    app = _make_app_with_details(tmp_path)
+    app.config["PUBLIC_MODE"] = True
+    client = app.test_client()
+    header = client.get("/download-csv?utility=Wenchi").get_data(as_text=True).splitlines()[0]
+    assert "meterid" not in header and "customer_no" not in header and "customer_name" not in header
+    assert "ocd_energy" in header and "utility" in header
+    page = client.get("/").get_data(as_text=True)
+    assert "Ama Mensah" not in page and "Phone number" not in page
+    app.config["PUBLIC_MODE"] = False
+    header = client.get("/download-csv?utility=Wenchi").get_data(as_text=True).splitlines()[0]
+    assert "meterid" in header and "customer_name" in header
+
+
+def test_upload_replace_mode_brings_new_columns(client):
+    rows = _synthetic_rows(n_meters=3, start=dt.date(2021, 1, 1), end=dt.date(2021, 3, 31))
+    df = pd.DataFrame(rows)
+    df["od_date"] = [d.strftime("%Y-%m-%d") for d in df["od_date"]]
+    df["customer_name"] = "Kofi"
+    body = df.to_csv(index=False).encode()
+    # Append mode ignores the unknown column and keeps the old rows.
+    r = client.post("/upload", data={"file": (io.BytesIO(body), "a.csv"), "mode": "append"},
+                    content_type="multipart/form-data", follow_redirects=True)
+    assert "new rows added" in r.get_data(as_text=True)
+    assert "Kofi" not in client.get("/customers/11010000001").get_data(as_text=True)
+    # Replace mode recreates the table from the file, columns included.
+    r = client.post("/upload", data={"file": (io.BytesIO(body), "a.csv"), "mode": "replace"},
+                    content_type="multipart/form-data", follow_redirects=True)
+    text = r.get_data(as_text=True)
+    assert "Dataset replaced" in text and "Data through Mar 2021" in text
+    assert client.get("/customers/11010000020").status_code == 404  # old meters are gone
+    assert "Kofi" in client.get("/customers/11010000001").get_data(as_text=True)

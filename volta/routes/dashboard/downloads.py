@@ -9,8 +9,12 @@ from typing import Iterable, Iterator, List
 
 from flask import Response, current_app, request
 
+from ...services.customers import detail_columns
+from ..auth import effective_public_mode
 from . import bp, get_datastore
 from .helpers import build_params
+
+SENSITIVE_COLUMNS = {"meterid", "customer_no"}
 
 
 def stream_csv(chunks: Iterable[tuple]) -> Iterator[str]:
@@ -44,6 +48,12 @@ def download_csv():
     params = build_params(request.args, base_columns=columns)
     clause, sql_params = params.to_sql_where(date_col=date_col, available_columns=columns)
 
-    sql = f"SELECT * FROM {datastore.table_sql} WHERE {clause} ORDER BY {date_col}"
+    if effective_public_mode():
+        # The public view never exposes identifiers or customer attributes.
+        hidden = SENSITIVE_COLUMNS | {c.lower() for c in detail_columns(columns)}
+        selected = ", ".join(f'"{c}"' for c in columns if c.lower() not in hidden) or "NULL AS empty"
+    else:
+        selected = "*"
+    sql = f"SELECT {selected} FROM {datastore.table_sql} WHERE {clause} ORDER BY {date_col}"
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return csv_response(datastore.stream_query(sql, sql_params), f"export_{ts}.csv")

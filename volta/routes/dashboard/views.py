@@ -10,10 +10,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from flask import current_app, jsonify, make_response, render_template, request
+from flask import current_app, jsonify, make_response, render_template, request, url_for
 from markupsafe import escape
 from werkzeug.datastructures import ImmutableMultiDict
 
+from ...services.customers import detail_columns
 from ...services.kpis import compute_kpis, period_presets
 from ..auth import effective_public_mode
 from . import bp, get_datastore, get_metrics, get_predictor
@@ -99,7 +100,8 @@ def _render_preview_table(rows: List[Dict[str, Any]], limit: int = PREVIEW_ROW_L
     if not rows:
         return ""
 
-    columns = [c for c in rows[0].keys() if not (is_public and c.lower() in SENSITIVE_COLUMNS)]
+    hidden = SENSITIVE_COLUMNS | {c.lower() for c in detail_columns(list(rows[0].keys()))} if is_public else set()
+    columns = [c for c in rows[0].keys() if c.lower() not in hidden]
     columns = sorted(columns, key=lambda c: (PREVIEW_COLUMN_ORDER.index(c) if c in PREVIEW_COLUMN_ORDER else len(PREVIEW_COLUMN_ORDER)))
     labels = dict(COLUMN_LABELS)
     labels.update(get_metrics().mapping)
@@ -108,9 +110,16 @@ def _render_preview_table(rows: List[Dict[str, Any]], limit: int = PREVIEW_ROW_L
         f'<th scope="col" class="{COLUMN_CLASSES.get(col, "text-nowrap")}">{escape(labels.get(col, col))}</th>'
         for col in columns
     )
+    def cell(col, value):
+        text = _format_value(col, value)
+        if col.lower() == "meterid" and not is_public and value not in (None, ""):
+            href = url_for("dashboard.customer", meterid=str(value))
+            return f'<a href="{href}" title="Open account">{text}</a>'
+        return text
+
     body = "".join(
         "<tr>"
-        + "".join(f'<td class="{COLUMN_CLASSES.get(col, "text-nowrap")}">{_format_value(col, row.get(col))}</td>' for col in columns)
+        + "".join(f'<td class="{COLUMN_CLASSES.get(col, "text-nowrap")}">{cell(col, row.get(col))}</td>' for col in columns)
         + "</tr>"
         for row in rows
     )

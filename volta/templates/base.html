@@ -34,6 +34,7 @@
                  href="{{ url_for('dashboard.predictions_public' if is_public else 'dashboard.predictions_private') }}">Forecasts</a>
             </li>
             {% if not is_public %}
+            <li class="nav-item"><a class="nav-link{{ ' active' if request.endpoint in ('dashboard.customers', 'dashboard.customer') }}" href="{{ url_for('dashboard.customers') }}">Customers</a></li>
             <li class="nav-item"><a class="nav-link{{ ' active' if request.endpoint == 'upload.upload_file' }}" href="{{ url_for('upload.upload_file') }}">Update data</a></li>
             {% endif %}
           </ul>
