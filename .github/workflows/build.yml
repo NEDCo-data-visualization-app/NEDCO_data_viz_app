@@ -4,10 +4,36 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: 
+  pull_request:
+  workflow_dispatch:
 
 jobs:
+  # Fast check on every PR and push: boots the app against a synthetic dataset.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest -q tests
+      - name: Build the Docker image and probe it
+        run: |
+          docker build -t voltav .
+          docker run -d --name voltav -p 5000:5000 -e PUBLIC_MODE=true -e ADMIN_TOKEN=ci voltav
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:5000/health && break; sleep 1; done
+          curl -sf http://127.0.0.1:5000/health | grep -q '"ok":true'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:5000/try_connection)" = "403"
+          docker logs voltav
+
   build-macos-public:
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
@@ -35,6 +61,7 @@ jobs:
       - name: Build Mac executable
         run: |
           source .venv/bin/activate
+          mkdir -p data
           pyinstaller \
             --onefile \
             --name volta_macos_public \
@@ -51,6 +78,7 @@ jobs:
 
   # macOS private
   build-macos-private:
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
@@ -76,6 +104,7 @@ jobs:
       - name: Build Mac executable
         run: |
           source .venv/bin/activate
+          mkdir -p data
           pyinstaller \
             --onefile \
             --name volta_macos_private \
@@ -92,6 +121,7 @@ jobs:
 
   # Windows public
   build-windows-public:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
@@ -115,6 +145,7 @@ jobs:
           echo "DB_PATH=data/warehouse_new.duckdb" >> .env
       - name: Build Windows executable
         run: |
+          New-Item -ItemType Directory -Force -Path data | Out-Null
           .\.venv\Scripts\python.exe -m PyInstaller `
             --onefile `
             --name volta_windows_public `
@@ -131,6 +162,7 @@ jobs:
 
   # Windows private
   build-windows-private:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
@@ -154,6 +186,7 @@ jobs:
           echo "DB_PATH=data/warehouse_new.duckdb" >> .env
       - name: Build Windows executable
         run: |
+          New-Item -ItemType Directory -Force -Path data | Out-Null
           .\.venv\Scripts\python.exe -m PyInstaller `
             --onefile `
             --name volta_windows_private `

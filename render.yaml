@@ -1,0 +1,35 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Deploys the dashboard in public mode (meter identifiers hidden) with the
+# DuckDB warehouse on a persistent disk. Persistent disks need a paid plan.
+services:
+  - type: web
+    name: voltav-dashboard
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: warehouse
+      mountPath: /app/data
+      sizeGB: 5
+    envVars:
+      - key: PUBLIC_MODE
+        value: "true"
+      - key: DB_PATH
+        value: /app/data/warehouse_new.duckdb
+      - key: PARQUET_PATH
+        value: merged_sales_customers_clean
+      - key: UPLOADS_DIR
+        value: /app/data/uploads
+      - key: SECRET_KEY
+        generateValue: true
+      # Required in the "token" field when uploading a CSV or refreshing the
+      # dataset. Copy it from the service's Environment tab.
+      - key: ADMIN_TOKEN
+        generateValue: true
+      # Optional remote parquet export; set these in the dashboard if you have one.
+      - key: BUCKET_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false

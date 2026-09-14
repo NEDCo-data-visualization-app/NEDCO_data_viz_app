@@ -3,75 +3,59 @@
 from __future__ import annotations
 
 import logging
-
-from typing import Any, Mapping, Optional, Union
-
-from flask import Flask
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-logger = logging.getLogger("volta")
-
-from .config import Config
-from .routes.dashboard import bp
-from .services.datastore import DataStore
-from .services.metrics import Metrics
 import os
 import sys
+from typing import Any, Mapping, Optional, Union
+
+from flask import Flask, get_flashed_messages
+
+from .config import Config
+from .routes.dashboard import bp as dashboard_bp
+from .routes.dashboard import aggregates, charts, downloads, filters, health, meterid, views  # noqa: F401 - registers routes
 from .routes.upload import upload_bp
+from .services.datastore import DataStore
+from .services.metrics import Metrics
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("volta")
 
 
-def create_app(
-    config_object: Optional[Union[str, Mapping[str, Any], type]] = None,
-) -> Flask:
+def create_app(config_object: Optional[Union[str, Mapping[str, Any], type]] = None) -> Flask:
     """Create and configure the Flask application."""
-
-    import os, sys
-    from .config import Config
-    from .services.datastore import DataStore
-    from .services.metrics import Metrics
-
-    from .routes.dashboard import bp as dashboard_bp
-    # Import submodules now to register routes
-    from .routes.dashboard import aggregates, charts, downloads, filters, health, meterid, views
-    from .routes.upload import upload_bp
-
     if getattr(sys, "frozen", False):
-        template_folder = os.path.join(sys._MEIPASS, "volta", "templates")
-        static_folder = os.path.join(sys._MEIPASS, "volta", "static")
-        app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
+        base = getattr(sys, "_MEIPASS")
+        app = Flask(
+            __name__,
+            template_folder=os.path.join(base, "volta", "templates"),
+            static_folder=os.path.join(base, "volta", "static"),
+        )
     else:
         app = Flask(__name__)
 
-    # -----------------------
-    # Config
-    # -----------------------
     if config_object is None:
         app.config.from_object(Config)
     elif isinstance(config_object, Mapping):
+        app.config.from_object(Config)
         app.config.from_mapping(config_object)
     else:
         app.config.from_object(config_object)
 
-    # -----------------------
-    # Initialize extensions
-    # -----------------------
     metrics = Metrics(app.config["METRICS"])
-    datastore = DataStore(config=app.config, metrics=metrics)
-
     app.extensions["metrics"] = metrics
-    app.extensions["datastore"] = datastore
+    app.extensions["datastore"] = DataStore(config=app.config, metrics=metrics)
 
-    # -----------------------
-    # Register blueprints (after importing submodules)
-    # -----------------------
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(upload_bp)
 
-    return app
+    @app.context_processor
+    def _inject_globals():
+        return {
+            "is_public": app.config.get("PUBLIC_MODE", False),
+            "admin_token_required": bool(app.config.get("ADMIN_TOKEN")),
+            "flashes": get_flashed_messages(with_categories=True),
+        }
 
+    return app
 
 
 __all__ = ["create_app"]

@@ -72,6 +72,7 @@
     </form>
   </div>
 
+  {% if not is_public %}
   <div class="card card-body shadow-sm">
     <h5 class="card-title mb-3">Update Data</h5>
     <div class="d-grid gap-2 mb-3">
@@ -84,12 +85,13 @@
 
     <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_file') }}">
       <div class="mb-3">
-        <label for="file" class="form-label">Please upload the csv below</label>
-        <input class="form-control" type="file" id="file" name="file" accept=".csv">
+        <label for="file" class="form-label">Upload a CSV to add rows to the dataset</label>
+        <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
       </div>
       <div class="d-grid gap-2">
         <button class="btn btn-success" type="submit">Upload</button>
       </div>
     </form>
-  </div> 
+  </div>
+  {% endif %}
 </div>

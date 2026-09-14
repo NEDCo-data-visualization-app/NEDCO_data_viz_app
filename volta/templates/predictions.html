@@ -22,6 +22,7 @@
       <div class="card-body">
         <form class="d-grid gap-4" novalidate
               data-prediction-filters
+              data-prediction-public="{{ 'true' if is_public else 'false' }}"
               data-prediction-predict-all-endpoint="{{ url_for('dashboard.predictions_predict_all') }}"
               data-prediction-predict-endpoint="{{ url_for('dashboard.predictions_predict_one') }}"
         >

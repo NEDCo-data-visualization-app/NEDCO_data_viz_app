@@ -3,13 +3,7 @@ import { drawPie } from './drawPie.js';
 import { drawBar } from './drawBar.js';
 import { urlWithFilters, updateUrlQuery } from '../utils/url.js';
 import { fetchJson } from '../utils/fetchJson.js';
-
-
-// debounce helper
-function debounce(fn, ms) {
-  let t;
-  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
-}
+import { debounce } from '../utils/debounce.js';
 
 // sync dropdown button text
 function updateMetricDropdownText() {
@@ -39,13 +33,8 @@ export function initCharts() {
   let refreshToken = 0;
   if (!checkboxes.length || !freqSelect || !lineEl) return;
 
-  // enforce max 2 metrics + sync text
-  checkboxes.forEach(cb => {
-    cb.addEventListener('change', () => {
-      updateMetricDropdownText();
-    });
-  });
-  
+  checkboxes.forEach(cb => cb.addEventListener('change', updateMetricDropdownText));
+
   const refresh = debounce(async () => {
     const token = ++refreshToken; 
     const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);

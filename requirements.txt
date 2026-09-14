@@ -3,11 +3,9 @@ pandas
 pyarrow
 python-dotenv
 requests
-dotenv
 duckdb
-matplotlib
-openpyxl
-xlrd
 joblib
 lightgbm
-db-dtypes
+scikit-learn
+openpyxl
+xlrd
