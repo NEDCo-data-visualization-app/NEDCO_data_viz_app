@@ -192,3 +192,32 @@ def test_gunicorn_entrypoint_exposes_app(monkeypatch, tmp_path):
     import run
     importlib.reload(run)
     assert run.app.name == "volta.app"
+
+
+def test_upload_accepts_legacy_shiny_export(tmp_path):
+    """The older wkfile_shiny.csv export uses different column names and dd-Mon-yy dates."""
+    app = _make_app(tmp_path, with_data=False)
+    client = app.test_client()
+    csv = (
+        "meterid,chargedate,chargedate_str,loc,res,month,month_str,kwh,year,ghc,paymoney\n"
+        "1,15-Feb-19,15-Feb-2019,Techiman [13],N-Resid [0],Feb-19,01-Feb-2019,14.2,2019,23.1705,140\n"
+        "1,11-Mar-19,11-Mar-2019,Techiman [13],N-Resid [0],Mar-19,01-Mar-2019,57.4,2019,38.8886,40\n"
+        "2,20-Apr-19,20-Apr-2019,Wenchi [2],Resid [1],Apr-19,01-Apr-2019,57.4,2019,38.8886,20\n"
+    ).encode()
+    resp = client.post("/upload", data={"file": (io.BytesIO(csv), "wkfile_shiny.csv")},
+                       content_type="multipart/form-data", follow_redirects=True)
+    assert resp.status_code == 200 and b"3 new rows added" in resp.data, resp.data[:400]
+
+    health = client.get("/health").get_json()
+    assert health["rows"] == 3
+    datastore = app.extensions["datastore"]
+    cols = {r["column_name"]: r["column_type"] for r in datastore.run_query(f"DESCRIBE {datastore.table_sql}")}
+    for canonical in ("od_date", "utility", "tariff_type", "ocd_energy", "ocd_cash_received", "ocd_paymoney"):
+        assert canonical in cols, cols
+    assert cols["od_date"] == "DATE" and "kwh" not in cols and "loc" not in cols
+
+    chart = client.get("/chart-data?metric=ocd_energy&freq=M").get_json()
+    assert chart["labels"] == ["2019-02", "2019-03", "2019-04"]
+    bars = client.get("/bar-data?metric=ocd_paymoney").get_json()
+    assert set(bars[0]["labels"]) == {"Techiman [13]", "Wenchi [2]"}
+    assert b"Meter ID" in client.get("/").data
