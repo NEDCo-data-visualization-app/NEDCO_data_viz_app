@@ -112,3 +112,4 @@ volta-test-481721-d739177e4f83.json
 # Data exports must never be committed
 *.csv
 *.parquet
+.duckdb_tmp/

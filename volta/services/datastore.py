@@ -58,10 +58,33 @@ class DataStore:
         self.db_path = Path(config["DB_PATH"])
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._con = duckdb.connect(database=str(self.db_path), read_only=False)
+        self._apply_resource_limits()
         self._lock = threading.RLock()
         self._columns: Optional[List[str]] = None
         self._extent: Optional[Dict[str, Any]] = None
         logger.info("DuckDB opened at %s (table %s)", self.db_path, self.table)
+
+    def _apply_resource_limits(self) -> None:
+        """Keep DuckDB inside the container's memory: spill to disk instead of getting killed.
+
+        DUCKDB_MEMORY_LIMIT (e.g. "256MB") caps DuckDB's buffer pool; large
+        ingests and sorts then spill to a temp directory next to the database
+        file, which sits on the persistent disk in hosted deployments.
+        DUCKDB_THREADS bounds parallelism, which also bounds memory.
+        """
+        limit = self.config.get("DUCKDB_MEMORY_LIMIT")
+        threads = self.config.get("DUCKDB_THREADS")
+        temp_dir = self.db_path.parent / ".duckdb_tmp"
+        try:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            self._con.execute(f"SET temp_directory = '{str(temp_dir).replace(chr(39), chr(39) * 2)}'")
+            if limit:
+                self._con.execute(f"SET memory_limit = '{str(limit).replace(chr(39), chr(39) * 2)}'")
+            if threads:
+                self._con.execute(f"SET threads = {int(threads)}")
+            logger.info("DuckDB limits: memory=%s threads=%s temp=%s", limit or "default", threads or "default", temp_dir)
+        except Exception as exc:  # noqa: BLE001 - limits are best effort
+            logger.warning("Could not apply DuckDB resource limits: %s", exc)
 
     # ------------------------------------------------------------------ basics
     @property
