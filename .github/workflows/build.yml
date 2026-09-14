@@ -4,10 +4,28 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: 
+  pull_request:
+  workflow_dispatch:
 
 jobs:
+  # Fast check on every PR and push: boots the app against a synthetic dataset.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest -q tests
+
   build-macos-public:
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
@@ -52,6 +70,7 @@ jobs:
 
   # macOS private
   build-macos-private:
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
@@ -94,6 +113,7 @@ jobs:
 
   # Windows public
   build-windows-public:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
@@ -134,6 +154,7 @@ jobs:
 
   # Windows private
   build-windows-private:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     env:
       BUCKET_URL: ${{ secrets.BUCKET_URL }}
