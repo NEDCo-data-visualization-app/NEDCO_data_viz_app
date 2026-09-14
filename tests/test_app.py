@@ -297,3 +297,17 @@ def test_upload_accepts_legacy_shiny_export(tmp_path):
     bars = client.get("/bar-data?metric=ocd_paymoney").get_json()
     assert set(bars[0]["labels"]) == {"Techiman [13]", "Wenchi [2]"}
     assert b"Meter ID" in client.get("/").data
+
+
+def test_duckdb_resource_limits_are_applied(tmp_path):
+    app = create_app(
+        {"DB_PATH": str(tmp_path / "w.duckdb"), "PARQUET_PATH": TABLE, "TESTING": True,
+         "DUCKDB_MEMORY_LIMIT": "128MB", "DUCKDB_THREADS": 1}
+    )
+    ds = app.extensions["datastore"]
+    settings = {r["name"]: r["value"] for r in ds.run_query(
+        "SELECT name, value FROM duckdb_settings() WHERE name IN ('memory_limit', 'threads', 'temp_directory')"
+    )}
+    assert settings["threads"] == "1"
+    assert settings["memory_limit"].replace(" ", "") in ("128.0MiB", "128MB", "122.0MiB")
+    assert settings["temp_directory"].endswith(".duckdb_tmp")
