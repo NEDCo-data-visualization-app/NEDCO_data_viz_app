@@ -40,6 +40,18 @@
             <label for="file" class="form-label">Upload a CSV file</label>
             <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
           </div>
+          {% if data_extent and data_extent.rows %}
+          <div class="mb-3">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="mode" id="modeAppend" value="append" checked>
+              <label class="form-check-label" for="modeAppend">Add new rows <span class="text-muted small">(rows already present are skipped)</span></label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="mode" id="modeReplace" value="replace">
+              <label class="form-check-label" for="modeReplace">Replace the whole dataset <span class="text-muted small">(use this when the export has new columns, such as customer details)</span></label>
+            </div>
+          </div>
+          {% endif %}
           <div class="d-grid gap-2">
             <button class="btn btn-success" type="submit">Upload</button>
           </div>

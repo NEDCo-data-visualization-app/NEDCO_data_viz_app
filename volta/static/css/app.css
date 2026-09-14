@@ -126,3 +126,18 @@ h1, h2, h3, h4, h5, h6 { color: var(--nedco-navy); }
 
 /* ---------- Auth pages ---------- */
 .auth-logo { height: 96px; width: auto; }
+
+/* ---------- Customer lookup & account ---------- */
+.lookup-table td, .lookup-table th { padding: .55rem .75rem; }
+.account-head h1 { color: var(--nedco-navy); }
+.account-details dt { font-weight: 500; color: var(--ink-2); font-size: .85rem; }
+.account-details dd { font-size: .9rem; }
+.status-active { background: #e3f3e8; color: #1c7c3a; }
+.status-dormant { background: #fdf1d6; color: #8a5a00; }
+.status-inactive { background: #f9e0dc; color: var(--nedco-red); }
+.status-unknown { background: var(--plane); color: var(--ink-2); }
+.signals .signal-warning { border-left: 4px solid var(--nedco-gold); }
+.signals .signal-ok { border-left: 4px solid #1c7c3a; }
+.signals .signal-info { border-left: 4px solid var(--nedco-sky); }
+.purchases-scroll { max-height: 420px; overflow-y: auto; }
+.breadcrumb-item + .breadcrumb-item::before { color: var(--ink-muted); }

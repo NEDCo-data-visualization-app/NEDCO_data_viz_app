@@ -50,10 +50,11 @@ def upload_file():
         flash("Only .csv files are supported.", "warning")
         return redirect(request.url)
 
+    replace = request.form.get("mode") == "replace"
     filepath = _uploads_dir() / secure_filename(file.filename)
     try:
         file.save(str(filepath))
-        added = current_app.extensions["datastore"].ingest_csv(filepath)
+        added = current_app.extensions["datastore"].ingest_csv(filepath, replace=replace)
     except ValueError as exc:
         flash(str(exc), "danger")
         return redirect(request.url)
@@ -64,7 +65,10 @@ def upload_file():
     finally:
         filepath.unlink(missing_ok=True)
 
-    flash(f"Upload complete: {added:,} new rows added.", "success")
+    if replace:
+        flash(f"Dataset replaced: {added:,} rows loaded.", "success")
+    else:
+        flash(f"Upload complete: {added:,} new rows added.", "success")
     return redirect(url_for("dashboard.index"))
 
 

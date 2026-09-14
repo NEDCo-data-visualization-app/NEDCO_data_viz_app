@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Meter {{ a.meterid }} · NEDCo Customer Dashboard{% endblock %}
+
+{% macro delta(value, good_when_up=true, neutral=false) -%}
+  {% if value is none %}
+    <span class="kpi-delta kpi-delta-none" title="No earlier period to compare with">—</span>
+  {% else %}
+    {% set up = value > 0.05 %}{% set down = value < -0.05 %}
+    {% set tone = 'neutral' if neutral or (not up and not down) else ('good' if (up == good_when_up) else 'bad') %}
+    <span class="kpi-delta kpi-delta-{{ tone }}" title="Change versus the previous 12 months">
+      {% if up %}&#9650; {{ "{:+.1f}".format(value) }}%{% elif down %}&#9660; {{ "{:+.1f}".format(value) }}%{% else %}no change{% endif %}
+    </span>
+  {% endif %}
+{%- endmacro %}
+
+{% macro tile(label, value, unit, delta_html, sub) -%}
+  <div class="col-6 col-xl">
+    <div class="card stat-tile kpi-tile">
+      <div class="card-body py-3">
+        <div class="stat-label">{{ label }}</div>
+        <div class="stat-value tabular">{{ value }}{% if unit %} <span class="kpi-unit">{{ unit }}</span>{% endif %}</div>
+        <div class="stat-sub d-flex flex-wrap align-items-center gap-2">{{ delta_html }}{% if sub %}<span>{{ sub }}</span>{% endif %}</div>
+      </div>
+    </div>
+  </div>
+{%- endmacro %}
+
+{% block content %}
+{% set cur = a.kpis.current %}{% set d = a.kpis.deltas %}
+<nav aria-label="breadcrumb" class="mb-2">
+  <ol class="breadcrumb small mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('dashboard.customers') }}">Customers</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Meter {{ a.meterid }}</li>
+  </ol>
+</nav>
+
+<div class="card mb-4 account-head">
+  <div class="card-body">
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+      <div>
+        <div class="stat-label">Meter number</div>
+        <h1 class="h3 mb-1 tabular">{{ a.meterid }}</h1>
+        <div class="text-muted small">
+          Customer no. <span class="tabular">{{ a.customer_no or '—' }}</span>
+          &middot; {{ a.tariff_type or 'Account type unknown' }}
+          &middot; {{ a.utility or 'District unknown' }}
+        </div>
+      </div>
+      <div class="text-lg-end">
+        <span class="badge rounded-pill status-{{ a.status.key }}">{{ a.status.label }}</span>
+        <div class="text-muted small mt-1">
+          Last purchase {{ a.last_purchase.strftime('%-d %b %Y') }}
+          {% if a.status.months_since %}({{ a.status.months_since }} month{{ '' if a.status.months_since == 1 else 's' }} before the data ends){% endif %}
+        </div>
+        <div class="text-muted small">Customer since {{ a.first_purchase.strftime('%b %Y') }} &middot; {{ "{:,}".format(a.purchases) }} purchases &middot; GH₵ {{ a.paymoney|full(0) }} paid in total</div>
+      </div>
+    </div>
+    {% if a.details %}
+      <hr class="my-3">
+      <dl class="row mb-0 account-details">
+        {% for label, value in a.details %}
+          <dt class="col-sm-3 col-lg-2">{{ label }}</dt>
+          <dd class="col-sm-9 col-lg-4 mb-1">{{ value }}</dd>
+        {% endfor %}
+      </dl>
+    {% endif %}
+  </div>
+</div>
+
+<section class="mb-4" aria-labelledby="accountKpis">
+  <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2 section-heading">
+    <h2 class="h6 mb-0" id="accountKpis">Last 12 months</h2>
+    <span class="text-muted small">{{ a.window.start.strftime('%-d %b %Y') }} to {{ a.window.end.strftime('%-d %b %Y') }}
+      {% if a.kpis.previous %}&middot; change versus the 12 months before{% else %}&middot; no earlier period to compare with{% endif %}</span>
+  </div>
+  {% if cur.purchases %}
+  <div class="row g-3">
+    {{ tile('Energy bought', cur.energy|compact, 'kWh', delta(d.energy), "{:,} purchases".format(cur.purchases)) }}
+    {{ tile('Amount paid', cur.paymoney|compact, 'GH₵', delta(d.paymoney), 'prepaid purchases') }}
+    {{ tile('Spend per month', cur.spend_per_customer_month|compact, 'GH₵', delta(d.spend_per_customer_month), 'per month with a purchase') }}
+    {{ tile('Average price', (cur.price_per_kwh|full(2) if cur.price_per_kwh is not none else '—'), 'GH₵/kWh', delta(d.price_per_kwh, neutral=true), 'amount paid per kWh') }}
+    {% if a.peer.ratio is not none %}
+      {{ tile('Versus similar customers', "{:.0f}%".format(a.peer.ratio * 100), '', '',
+              'of the median ' ~ (a.peer.median_kwh|compact) ~ ' kWh for ' ~ "{:,}".format(a.peer.customers) ~ ' ' ~ (a.tariff_type or '') ~ ' customers in ' ~ (a.utility or 'the district')) }}
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="alert alert-secondary mb-0">No purchases in the last 12 months of data.</div>
+  {% endif %}
+</section>
+
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-8">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+          <div>
+            <div class="chart-title">Energy bought per month</div>
+            <div class="chart-subtitle">This meter against the median {{ a.tariff_type or '' }} customer in {{ a.utility or 'the district' }}.</div>
+          </div>
+          <div class="btn-group btn-group-sm" role="group" aria-label="History">
+            <a class="btn btn-outline-primary{{ ' active' if a.history == '24m' }}" href="{{ url_for('dashboard.customer', meterid=a.meterid) }}">Last 24 months</a>
+            <a class="btn btn-outline-primary{{ ' active' if a.history == 'all' }}" href="{{ url_for('dashboard.customer', meterid=a.meterid, history='all') }}">All history</a>
+          </div>
+        </div>
+        <div class="chart-box"><canvas id="accountEnergyChart" aria-label="Energy bought per month"></canvas></div>
+        <div class="chart-actions"><button class="btn btn-sm btn-outline-secondary" type="button" onclick="downloadChart('accountEnergyChart','meter_{{ a.meterid }}_energy.png')">Download image</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="chart-title">Amount paid per month</div>
+        <div class="chart-subtitle">GH₵, same months.</div>
+        <div class="chart-box"><canvas id="accountPaidChart" aria-label="Amount paid per month"></canvas></div>
+        <div class="chart-actions"><button class="btn btn-sm btn-outline-secondary" type="button" onclick="downloadChart('accountPaidChart','meter_{{ a.meterid }}_paid.png')">Download image</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-4">
+    <div class="card">
+      <div class="card-header">Things to check</div>
+      <ul class="list-group list-group-flush signals">
+        {% for s in a.signals %}
+        <li class="list-group-item signal-{{ s.level }}">
+          <div class="fw-semibold">{{ s.title }}</div>
+          <div class="small text-muted">{{ s.detail }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="card-footer small text-muted">Indicators from purchase patterns, not evidence. A low figure can also mean a solar system, a vacant property or a second meter.</div>
+    </div>
+  </div>
+  <div class="col-12 col-lg-8">
+    <div class="card h-100">
+      <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <span>Purchase history <span class="text-muted small fw-normal">{% if a.recent_limit < a.purchases %}{{ a.recent_limit }} most recent of {{ "{:,}".format(a.purchases) }}{% else %}all {{ "{:,}".format(a.purchases) }} purchases{% endif %}</span></span>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard.download_csv', meterid=a.meterid) }}">Download full history (CSV)</a>
+      </div>
+      <div class="table-responsive purchases-scroll">
+        <table class="table table-sm table-striped align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col" class="text-end">Energy (kWh)</th>
+              <th scope="col" class="text-end">Amount paid (GH₵)</th>
+              <th scope="col" class="text-end">Cash received (GH₵)</th>
+              <th scope="col" class="text-end">GH₵/kWh</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in a.recent_purchases %}
+            <tr>
+              <td class="text-nowrap">{{ r.od_date.strftime('%-d %b %Y') if r.od_date else '—' }}</td>
+              <td class="text-end tabular">{{ r.ocd_energy|full(2) }}</td>
+              <td class="text-end tabular">{{ r.ocd_paymoney|full(2) }}</td>
+              <td class="text-end tabular">{{ r.ocd_cash_received|full(2) }}</td>
+              <td class="text-end tabular">{{ (r.ocd_paymoney / r.ocd_energy)|full(2) if r.ocd_energy and r.ocd_paymoney is not none else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="accountSeries">{{ a.series|tojson }}</script>
+{% endblock %}

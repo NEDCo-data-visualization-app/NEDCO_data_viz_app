@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Customers · NEDCo Customer Dashboard{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-10 col-xl-8">
+    <h1 class="h4 mb-1">Customer lookup</h1>
+    <p class="text-muted small mb-3">Find a prepaid account by meter number or customer number. Any part of the number works.</p>
+
+    <form method="get" action="{{ url_for('dashboard.customers') }}" class="card mb-4" role="search">
+      <div class="card-body py-3">
+        <div class="input-group input-group-lg">
+          <input type="search" class="form-control" name="q" value="{{ q }}" placeholder="Meter number or customer number"
+                 inputmode="numeric" autocomplete="off" autofocus aria-label="Meter number or customer number">
+          <button class="btn btn-primary px-4" type="submit">Search</button>
+        </div>
+      </div>
+    </form>
+
+    {% if q %}
+      {% if result.rows %}
+        <div class="card">
+          <div class="card-header d-flex flex-wrap align-items-baseline gap-2">
+            <span>{{ result.rows|length }}{{ '+' if result.truncated }} match{{ 'es' if result.rows|length != 1 }}</span>
+            {% if result.truncated %}<span class="text-muted small fw-normal">showing the first {{ result.rows|length }}; type more digits to narrow down</span>{% endif %}
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 lookup-table">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col">Meter number</th>
+                  <th scope="col">Customer no.</th>
+                  <th scope="col">District</th>
+                  <th scope="col">Account type</th>
+                  <th scope="col" class="text-end">Purchases</th>
+                  <th scope="col" class="text-end">Amount paid (GH₵)</th>
+                  <th scope="col">Last purchase</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for r in result.rows %}
+                <tr>
+                  <td class="text-nowrap"><a href="{{ url_for('dashboard.customer', meterid=r.meterid) }}" class="fw-semibold">{{ r.meterid }}</a></td>
+                  <td class="text-nowrap">{{ r.customer_no or '—' }}</td>
+                  <td>{{ r.utility or '—' }}</td>
+                  <td>{{ r.tariff_type or '—' }}</td>
+                  <td class="text-end tabular">{{ "{:,}".format(r.purchases) }}</td>
+                  <td class="text-end tabular">{{ r.paymoney|full(2) }}</td>
+                  <td class="text-nowrap">{{ r.last_purchase.strftime('%-d %b %Y') if r.last_purchase else '—' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% else %}
+        <div class="alert alert-info">No meter or customer number contains “{{ q }}”.</div>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

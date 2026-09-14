@@ -236,13 +236,14 @@ class DataStore:
         }
 
     # ------------------------------------------------------------- ingestion
-    def ingest_csv(self, path: Union[str, Path]) -> int:
+    def ingest_csv(self, path: Union[str, Path], replace: bool = False) -> int:
         """Append the rows of a CSV file to the dataset table and return how many were added.
 
         Columns are matched by name (case-insensitive) against the existing
         table and cast to its types; the date column also accepts DATE_FMT.
-        Rows already present are skipped. If the table does not exist yet it
-        is created from the file.
+        Rows already present are skipped. If the table does not exist yet, or
+        ``replace`` is set, the table is (re)created from the file, so new
+        columns such as customer attributes come through.
         """
         date_col = self.date_col.lower()
         # DDL statements cannot be prepared in DuckDB, so literals are inlined (escaped).
@@ -262,7 +263,7 @@ class DataStore:
                     raw_cols[lower] = name
             for canonical, original in aliased.items():
                 raw_cols.setdefault(canonical, original)
-            exists = self.table_exists()
+            exists = self.table_exists() and not replace
 
             if exists:
                 schema = self._con.execute(f"DESCRIBE {self.table_sql}").fetchall()
@@ -306,7 +307,7 @@ class DataStore:
                 result = self._con.execute(sql).fetchone()
                 added = int(result[0]) if result else 0
             else:
-                self._con.execute(f"CREATE TABLE {self.table_sql} AS {staged}")
+                self._con.execute(f"CREATE OR REPLACE TABLE {self.table_sql} AS {staged}")
                 result = self._con.execute(f"SELECT COUNT(*) FROM {self.table_sql}").fetchone()
                 added = int(result[0]) if result else 0
 

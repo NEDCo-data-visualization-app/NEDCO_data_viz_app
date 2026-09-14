@@ -110,6 +110,28 @@ def ensure_links(con: duckdb.DuckDBPyConnection):
 
 
 
+# Column-name fragments that identify customer attributes in the merged table
+# (the customer list's headers are slugged to snake_case by build_links.py).
+CUSTOMER_ATTRIBUTE_HINTS = (
+    "name", "address", "phone", "contact", "mobile", "email", "town", "area", "region",
+    "location", "street", "category", "status", "type", "ghana_post", "gps",
+)
+CUSTOMER_ATTRIBUTE_SKIP = ("meterid", "meter_no", "customer_no", "norm", "od_", "ocd_", "tariff_type", "utility")
+
+
+def customer_attribute_columns(con: duckdb.DuckDBPyConnection) -> list:
+    """Columns of the merged table that look like customer attributes (not transactions)."""
+    names = [r[0] for r in con.execute(f"DESCRIBE {MERGED_TABLE}").fetchall()]
+    out = []
+    for name in names:
+        lower = name.lower()
+        if any(lower.startswith(skip) or lower.endswith(skip) for skip in CUSTOMER_ATTRIBUTE_SKIP):
+            continue
+        if any(hint in lower for hint in CUSTOMER_ATTRIBUTE_HINTS):
+            out.append(name)
+    return out
+
+
 def clean_and_save(con: duckdb.DuckDBPyConnection):
     """
     - Load merged_sales_customers
@@ -129,9 +151,15 @@ def clean_and_save(con: duckdb.DuckDBPyConnection):
         "utility",
         "tariff_type",
     ]
+    # Customer attributes from the customer list (name, address, phone, ...)
+    # ride along so the dashboard's account page can show them. They may be
+    # empty for meters that did not match the customer list.
+    extra_cols = customer_attribute_columns(con)
+    if extra_cols:
+        print(f"Keeping customer attribute columns: {', '.join(extra_cols)}")
 
     # Load data
-    query = f"SELECT {', '.join(cols)} FROM {MERGED_TABLE}"
+    query = f"SELECT {', '.join(cols + extra_cols)} FROM {MERGED_TABLE}"
     df = con.execute(query).df()
 
     # Convert od_date to date only
@@ -149,8 +177,10 @@ def clean_and_save(con: duckdb.DuckDBPyConnection):
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # Drop any rows with missing data (instead of dropping columns)
-    df = df.dropna(how="any")
+    # Drop rows with missing transaction data (customer attributes may be empty)
+    df = df.dropna(subset=cols, how="any")
+    for c in extra_cols:
+        df[c] = df[c].astype("string").str.strip()
 
     # Drop duplicates
     df = df.drop_duplicates()
