@@ -14,6 +14,7 @@ from flask import current_app, jsonify, make_response, render_template, request
 from markupsafe import escape
 from werkzeug.datastructures import ImmutableMultiDict
 
+from ...services.kpis import compute_kpis, period_presets
 from ..auth import effective_public_mode
 from . import bp, get_datastore, get_metrics, get_predictor
 from .downloads import csv_response
@@ -145,6 +146,9 @@ def index(first_load_override: Optional[bool] = None, is_public: Optional[bool] 
 
     stats = datastore.compute_stats(where_clause=clause, sql_params=sql_params)
     summary = datastore.compute_summary(where_clause=clause, sql_params=sql_params)
+    kpis = compute_kpis(datastore, params, date_col, columns)
+    extent = datastore.data_extent()
+    presets = period_presets(extent.get("date_min"), extent.get("date_max"))
 
     facet_cols = ["utility", "tariff_type"] if public else ["meterid", "utility", "tariff_type"]
     unique_values = build_unique_values(
@@ -160,6 +164,8 @@ def index(first_load_override: Optional[bool] = None, is_public: Optional[bool] 
         date_col=date_col,
         stats=stats,
         summary=summary,
+        kpis=kpis,
+        period_presets=presets,
         start_value=args.get("start_date") or summary.get("date_min", ""),
         end_value=args.get("end_date") or summary.get("date_max", ""),
         unique_values=unique_values,

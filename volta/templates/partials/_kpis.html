@@ -1,16 +1,66 @@
-{% if summary and summary.rows %}
-<div class="row g-3 mb-4">
-  <div class="col-6 col-lg-3">
-    {{ ui.stat_tile('Customers', "{:,}".format(summary.meters), 'meters with at least one purchase') }}
+{% if kpis and kpis.current.purchases %}
+{% set cur = kpis.current %}
+{% set prev = kpis.previous %}
+{% set d = kpis.deltas %}
+{% set period = kpis.period %}
+
+{% macro delta(value, good_when_up=true, neutral=false) -%}
+  {% if value is none %}
+    <span class="kpi-delta kpi-delta-none" title="No earlier period to compare with">—</span>
+  {% else %}
+    {% set up = value > 0.05 %}
+    {% set down = value < -0.05 %}
+    {% set tone = 'neutral' if neutral or (not up and not down) else ('good' if (up == good_when_up) else 'bad') %}
+    <span class="kpi-delta kpi-delta-{{ tone }}" title="Change versus the previous period">
+      {% if up %}&#9650; {{ "{:+.1f}".format(value) }}%{% elif down %}&#9660; {{ "{:+.1f}".format(value) }}%{% else %}no change{% endif %}
+    </span>
+  {% endif %}
+{%- endmacro %}
+
+{% macro tile(label, value, unit, delta_html, sub, full=None) -%}
+  <div class="col-6 col-lg-4 col-xl-2">
+    <div class="card stat-tile kpi-tile">
+      <div class="card-body py-3">
+        <div class="stat-label">{{ label }}</div>
+        <div class="stat-value tabular"{% if full %} title="{{ full }}"{% endif %}>{{ value }}{% if unit %} <span class="kpi-unit">{{ unit }}</span>{% endif %}</div>
+        <div class="stat-sub d-flex flex-wrap align-items-center gap-2">
+          {{ delta_html }}
+          {% if sub %}<span>{{ sub }}</span>{% endif %}
+        </div>
+      </div>
+    </div>
   </div>
-  <div class="col-6 col-lg-3">
-    {{ ui.stat_tile('Districts', "{:,}".format(summary.locations), 'with transactions in this period') }}
+{%- endmacro %}
+
+<section class="mb-4" id="kpis" aria-labelledby="kpisHeading">
+  <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2 section-heading">
+    <h2 class="h6 mb-0" id="kpisHeading">Key figures</h2>
+    {% set period_label = period.start.strftime('%-d %b %Y') ~ ' to ' ~ period.end.strftime('%-d %b %Y') ~ ' (' ~ period.months ~ (' month)' if period.months == 1 else ' months)') %}
+    {% if prev %}
+      {% set compare_label = 'compared with ' ~ prev.start.strftime('%-d %b %Y') ~ ' to ' ~ prev.end.strftime('%-d %b %Y') ~ (', where data is only partly available' if prev.partial else '') %}
+    {% else %}
+      {% set compare_label = 'no earlier period to compare with' %}
+    {% endif %}
+    <span class="text-muted small">{{ period_label }} &middot; {{ compare_label }}</span>
   </div>
-  <div class="col-6 col-lg-3">
-    {{ ui.stat_tile('Transactions', "{:,}".format(summary.rows), 'prepaid purchases') }}
+
+  <div class="row g-3">
+    {{ tile('Energy sold', cur.energy|compact, 'kWh', delta(d.energy), "{:,} purchases".format(cur.purchases), full=(cur.energy|full) ~ ' kWh') }}
+    {{ tile('Amount paid', cur.paymoney|compact, 'GH₵', delta(d.paymoney), 'prepaid purchases', full='GH₵ ' ~ (cur.paymoney|full(2))) }}
+    {{ tile('Active customers', cur.customers|compact, '', delta(d.customers),
+            ("{:,} district{}".format(cur.districts, '' if cur.districts == 1 else 's') if cur.districts else 'bought at least once'),
+            full=(cur.customers|full) ~ ' customers with at least one purchase') }}
+    {{ tile('Spend per customer', cur.spend_per_customer_month|compact, 'GH₵', delta(d.spend_per_customer_month), 'per active month',
+            full='Amount paid divided by customer-months (months in which a customer bought at least once)') }}
+    {{ tile('Average price', (cur.price_per_kwh|full(2) if cur.price_per_kwh is not none else '—'), 'GH₵/kWh', delta(d.price_per_kwh, neutral=true), 'amount paid per kWh') }}
+    {% if cur.residential_share is not none %}
+      {{ tile('Residential', "{:.0f}%".format(cur.residential_share), '', delta(d.residential_share, neutral=true), 'of active customers',
+              full=(cur.mix | map(attribute='tariff_type') | list | join(', ')) ~ ' — share of active customers') }}
+    {% elif cur.mix %}
+      {{ tile(cur.mix[0].tariff_type, "{:.0f}%".format(cur.mix[0].share), '', delta(none), 'of active customers') }}
+    {% else %}
+      {{ tile('Account types', '—', '', delta(none), 'no account type data') }}
+    {% endif %}
   </div>
-  <div class="col-6 col-lg-3">
-    {{ ui.stat_tile('Period', summary.date_min ~ ' to ' ~ summary.date_max, 'first and last transaction', small=true) }}
-  </div>
-</div>
+</section>
 {% endif %}

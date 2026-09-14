@@ -22,6 +22,7 @@ from .routes.dashboard import bp as dashboard_bp
 from .routes.dashboard import aggregates, charts, downloads, filters, health, meterid, views  # noqa: F401 - registers routes
 from .routes.upload import upload_bp
 from .services.datastore import DataStore
+from .services.kpis import fmt_compact, fmt_full
 from .services.metrics import Metrics
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -56,6 +57,9 @@ def create_app(config_object: Optional[Union[str, Mapping[str, Any], type]] = No
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(upload_bp)
     app.before_request(require_viewer_login)
+
+    app.jinja_env.filters["compact"] = fmt_compact
+    app.jinja_env.filters["full"] = fmt_full
 
     @app.context_processor
     def _inject_globals():

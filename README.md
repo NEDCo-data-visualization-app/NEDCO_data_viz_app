@@ -141,11 +141,18 @@ Notes:
 - The service runs a single Gunicorn worker because DuckDB permits one writer per file.
 
 ## Dashboard walkthrough
-- **Filters panel** – Stickied on the left, providing date pickers, accordion-based categorical filters, a meter ID search, and quick-reset controls.
-- **Charts** – A metric selector drives a time-series line chart, donut compositions, and totals by city. Each visualization offers a download button for offline reporting.
-- **Summary stats** – Displays dataset coverage (date range, meters, locations, row/column counts) and per-metric aggregates (sum, mean, median, min, max).
-- **Data table** – Renders a paginated preview of filtered records with an option to export the current result set as CSV.
-- **Update Data** – Buttons below the filters card let operators refresh from the remote source or upload a CSV without leaving the app.
+- **Filter bar** – Date range, District and Account type (and a meter-number search in the private view) sit in one row above the content. *Quick periods* (last month, last 3 / 12 / 24 months, all data) are relative to the newest data and apply immediately.
+- **Key figures** – Manager tiles computed over the current filters, each with the change versus the preceding period of equal length (whole-month ranges compare with the same months one period earlier; the comparison is omitted when there is no earlier data):
+  - *Energy sold* – sum of `ocd_energy` (kWh), with the number of prepaid purchases.
+  - *Amount paid* – sum of `ocd_paymoney` (GH₵). This is the revenue measure for prepaid customers; cash received is kept in the data for postpaid billing later but is not shown as a tile.
+  - *Active customers* – distinct meters with at least one purchase in the period, with the number of districts.
+  - *Spend per customer* – amount paid divided by customer-months (months in which a customer bought at least once), i.e. the average monthly spend of an active customer.
+  - *Average price* – amount paid divided by energy sold (GH₵/kWh), a realised-tariff check.
+  - *Residential* – share of active customers on a residential account type.
+- **Charts** – One metric at a time (energy, amount paid, cash received): total over time, by district, and share by account type. Each chart downloads as a PNG on a white background.
+- **Summary statistics** – Per-transaction sum, mean, median, min and max for each metric.
+- **Data table** – A preview of the most recent filtered records, with export of the full filtered result as CSV.
+- **Update data** – In the private view, the navigation links to the upload page (CSV append or refresh from the remote source).
 
 ## Forecasting & predictions
 - **Accessing the view** – Click **See Predictions** on the main dashboard. The private view (`/predictions/private`) adds a meter search; the public view (`/predictions`) only filters by location.

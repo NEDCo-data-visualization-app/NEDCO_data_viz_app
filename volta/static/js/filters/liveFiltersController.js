@@ -118,6 +118,21 @@ function defaultRenderer(container, { name, options, selected }) {
 
 export function getFilterStateSnapshot() { return buildSnapshot(); }
 
+// Set both dates programmatically (period shortcuts) and optionally apply.
+export function setDateRange(start, end, { submit = false } = {}) {
+  state.startDate = start || '';
+  state.endDate = end || '';
+  if (formEl) {
+    const startInput = formEl.querySelector('input[name="start_date"]');
+    const endInput = formEl.querySelector('input[name="end_date"]');
+    if (startInput) startInput.value = state.startDate;
+    if (endInput) endInput.value = state.endDate;
+  }
+  emitState();
+  if (submit) handleSubmit();
+  else scheduleRefresh();
+}
+
 export function onFilterStateChange(cb) {
   if (typeof cb !== 'function') return () => {};
   listeners.add(cb);
