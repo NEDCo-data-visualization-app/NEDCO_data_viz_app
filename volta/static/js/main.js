@@ -3,6 +3,7 @@ import { initLiveFilters } from './filters/liveFiltersController.js';
 import { initFilterSearch } from './filters/filterSearch.js';
 import { initMeteridDynamic } from './filters/meteridDynamic.js';
 import { initFilterSummary } from './filters/filterSummary.js';
+import { initPeriodPresets } from './filters/periodPresets.js';
 import { initPredictionFilters } from './predictions/initPredictionFilters.js';
 import { initPredictionActions } from './predictions/predictionActions.js';
 import { initPredictionCharts } from './predictions/predictionCharts.js';
@@ -20,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initFilterSearch();
   initMeteridDynamic();
   initFilterSummary();
+  initPeriodPresets();
   initPredictionFilters();
   initPredictionCharts();
   initPredictionActions();

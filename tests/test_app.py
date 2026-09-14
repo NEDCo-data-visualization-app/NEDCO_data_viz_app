@@ -306,7 +306,7 @@ def test_branding_and_layout(client):
     assert page.count('class="btn-check metric-checkbox"') == 3  # one metric at a time
     assert 'id="lineChartTotal"' in page and 'id="barChart"' in page and 'id="pieChart"' in page
     assert 'id="lineChart"' not in page  # the per-transaction mean chart is gone
-    assert "Customers" in page and "Transactions" in page  # KPI tiles
+    assert "Energy sold" in page and "Active customers" in page  # KPI tiles
     assert "District" in page and "Account type" in page
     assert client.get("/static/img/favicon-32.png").status_code == 200
     assert client.get("/static/js/charts/theme.js").status_code == 200
@@ -333,3 +333,91 @@ def test_duckdb_resource_limits_are_applied(tmp_path):
     assert settings["threads"] == "1"
     assert settings["memory_limit"].replace(" ", "") in ("128.0MiB", "128MB", "122.0MiB")
     assert settings["temp_directory"].endswith(".duckdb_tmp")
+
+
+def _expected_kpis(rows, start, end, utility=None):
+    df = pd.DataFrame(rows)
+    df = df[(df["od_date"] >= start) & (df["od_date"] <= end)]
+    if utility:
+        df = df[df["utility"] == utility]
+    month = df["od_date"].map(lambda d: (d.year, d.month))
+    customer_months = len(set(zip(df["meterid"], month)))
+    return {
+        "purchases": len(df),
+        "energy": df["ocd_energy"].sum(),
+        "paymoney": df["ocd_paymoney"].sum(),
+        "customers": df["meterid"].nunique(),
+        "spend": df["ocd_paymoney"].sum() / customer_months,
+        "residential": df.groupby("tariff_type")["meterid"].nunique().get("Residential", 0) / df["meterid"].nunique() * 100,
+    }
+
+
+def test_manager_kpis_match_the_data(tmp_path):
+    from volta.services.kpis import compute_kpis
+    from volta.utils.filter_params import FilterParams
+
+    app = _make_app(tmp_path)
+    rows = _synthetic_rows()
+    with app.app_context():
+        ds = app.extensions["datastore"]
+        cols = ds.get_columns()
+        params = FilterParams(start=dt.date(2019, 1, 1), end=dt.date(2019, 12, 31), selections={"utility": ["Techiman"]})
+        k = compute_kpis(ds, params, "od_date", cols)
+
+    cur, prev = k["current"], k["previous"]
+    exp = _expected_kpis(rows, dt.date(2019, 1, 1), dt.date(2019, 12, 31), "Techiman")
+    assert cur["purchases"] == exp["purchases"] and cur["customers"] == exp["customers"]
+    assert cur["energy"] == pytest.approx(exp["energy"]) and cur["paymoney"] == pytest.approx(exp["paymoney"])
+    assert cur["spend_per_customer_month"] == pytest.approx(exp["spend"])
+    assert cur["price_per_kwh"] == pytest.approx(exp["paymoney"] / exp["energy"])
+    assert cur["residential_share"] == pytest.approx(exp["residential"])
+    assert cur["districts"] == 1 and [m["tariff_type"] for m in cur["mix"]]
+
+    # Whole-year window compares with the whole previous year (data starts 5 Jan 2018 -> partial).
+    assert (prev["start"], prev["end"], prev["partial"]) == (dt.date(2018, 1, 1), dt.date(2018, 12, 31), True)
+    exp_prev = _expected_kpis(rows, dt.date(2018, 1, 1), dt.date(2018, 12, 31), "Techiman")
+    assert prev["energy"] == pytest.approx(exp_prev["energy"])
+    assert k["deltas"]["energy"] == pytest.approx((exp["energy"] - exp_prev["energy"]) / exp_prev["energy"] * 100)
+    assert k["period"]["months"] == 12
+
+    # No filters: the whole dataset, nothing earlier to compare with.
+    with app.app_context():
+        k_all = compute_kpis(ds, FilterParams(), "od_date", cols)
+    assert k_all["previous"] is None and k_all["deltas"]["energy"] is None
+    assert k_all["current"]["purchases"] == len(rows)
+
+
+def test_kpi_tiles_and_period_presets_on_the_page(client):
+    page = client.get("/?start_date=2019-01-01&end_date=2019-12-31").get_data(as_text=True)
+    assert "Key figures" in page and "1 Jan 2019 to 31 Dec 2019 (12 months)" in page
+    assert "compared with 1 Jan 2018 to 31 Dec 2018" in page
+    for label in ("Energy sold", "Amount paid", "Active customers", "Spend per customer", "Average price", "Residential"):
+        assert label in page
+    assert "Cash received" not in page.split('id="kpis"')[1].split("</section>")[0]  # prepaid: no cash tiles
+    assert 'data-period-start="2019-10-01" data-period-end="2020-09-12">Last 12 months' in page
+    assert 'data-period-start="2018-01-05" data-period-end="2020-09-12">All data' in page
+    assert client.get("/static/js/filters/periodPresets.js").status_code == 200
+
+    # Empty selection: the section is skipped rather than showing zeros.
+    empty = client.get("/?start_date=2030-01-01&end_date=2030-12-31").get_data(as_text=True)
+    assert 'id="kpis"' not in empty
+
+
+def test_compact_number_formatting():
+    from volta.services.kpis import fmt_compact, pct_change
+
+    assert fmt_compact(950) == "950" and fmt_compact(1234) == "1.2 k"
+    assert fmt_compact(2_500_000) == "2.5 M" and fmt_compact(3_200_000_000) == "3.2 bn"
+    assert fmt_compact(None) == "—" and fmt_compact(12.345, 2) == "12.35"
+    assert pct_change(110, 100) == pytest.approx(10) and pct_change(5, 0) is None
+
+
+def test_previous_period_window_rules():
+    from volta.services.kpis import _previous_window as prev
+
+    assert prev(dt.date(2019, 1, 1), dt.date(2019, 12, 31)) == (dt.date(2018, 1, 1), dt.date(2018, 12, 31))
+    assert prev(dt.date(2020, 9, 1), dt.date(2020, 9, 30)) == (dt.date(2020, 8, 1), dt.date(2020, 8, 31))
+    # "Last 12 months" to date: same months, same day of month, one year earlier.
+    assert prev(dt.date(2019, 10, 1), dt.date(2020, 9, 12)) == (dt.date(2018, 10, 1), dt.date(2019, 9, 12))
+    # Arbitrary ranges shift by their own length in days.
+    assert prev(dt.date(2020, 3, 10), dt.date(2020, 3, 19)) == (dt.date(2020, 2, 29), dt.date(2020, 3, 9))

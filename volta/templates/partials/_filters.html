@@ -56,6 +56,18 @@
           </div>
         {% endif %}
 
+        {% if period_presets %}
+          <div class="col-12 col-xl-auto">
+            <span class="form-label d-block">Quick periods</span>
+            <div class="d-flex flex-wrap gap-1 period-presets" role="group" aria-label="Quick periods">
+              {% for p in period_presets %}
+                <button type="button" class="btn btn-sm btn-outline-primary{% if p.start == start_value and p.end == end_value %} active{% endif %}"
+                        data-period-start="{{ p.start }}" data-period-end="{{ p.end }}">{{ p.label }}</button>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
         <div class="col-12 col-xl-auto ms-xl-auto d-flex gap-2">
           <input type="hidden" name="metric" id="metricHidden" value="{{ current_metric }}">
           <input type="hidden" name="freq" id="freqHidden" value="{{ (args.get('freq') or 'M')|upper }}">
