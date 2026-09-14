@@ -10,6 +10,14 @@ from typing import Any, Mapping, Optional, Union
 from flask import Flask, get_flashed_messages
 
 from .config import Config
+from .routes.auth import (
+    auth_bp,
+    effective_public_mode,
+    has_private_access,
+    is_authenticated,
+    login_required_enabled,
+    require_viewer_login,
+)
 from .routes.dashboard import bp as dashboard_bp
 from .routes.dashboard import aggregates, charts, downloads, filters, health, meterid, views  # noqa: F401 - registers routes
 from .routes.upload import upload_bp
@@ -44,14 +52,18 @@ def create_app(config_object: Optional[Union[str, Mapping[str, Any], type]] = No
     app.extensions["metrics"] = metrics
     app.extensions["datastore"] = DataStore(config=app.config, metrics=metrics)
 
+    app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(upload_bp)
+    app.before_request(require_viewer_login)
 
     @app.context_processor
     def _inject_globals():
         return {
-            "is_public": app.config.get("PUBLIC_MODE", False),
+            "is_public": effective_public_mode(),
             "admin_token_required": bool(app.config.get("ADMIN_TOKEN")),
+            "show_logout": login_required_enabled() and is_authenticated(),
+            "private_session": has_private_access(),
             "flashes": get_flashed_messages(with_categories=True),
         }
 

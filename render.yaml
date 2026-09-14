@@ -24,6 +24,16 @@ services:
         value: /app/data/uploads
       - key: SECRET_KEY
         generateValue: true
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      # Passwords colleagues type to view the dashboard. Render asks for them
+      # when the Blueprint is applied; change them later in the Environment tab.
+      #   VIEWER_PASSWORD  -> public view (meter / customer numbers hidden)
+      #   PRIVATE_PASSWORD -> private view (identifiers visible, meter search, CSV download)
+      - key: VIEWER_PASSWORD
+        sync: false
+      - key: PRIVATE_PASSWORD
+        sync: false
       # Required in the "token" field when uploading a CSV or refreshing the
       # dataset. Copy it from the service's Environment tab.
       - key: ADMIN_TOKEN

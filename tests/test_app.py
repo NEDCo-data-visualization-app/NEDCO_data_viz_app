@@ -192,3 +192,79 @@ def test_gunicorn_entrypoint_exposes_app(monkeypatch, tmp_path):
     import run
     importlib.reload(run)
     assert run.app.name == "volta.app"
+
+
+def test_viewer_password_gates_everything_except_login_and_health(tmp_path):
+    app = _make_app(tmp_path, public=True)
+    app.config["VIEWER_PASSWORD"] = "letmein"
+    client = app.test_client()
+
+    # Pages redirect to the login page, API calls get a JSON 401, health stays open.
+    resp = client.get("/?utility=Techiman")
+    assert resp.status_code == 302 and resp.headers["Location"].startswith("/login?next=")
+    assert client.get("/predictions").status_code == 302
+    assert client.get("/chart-data?metric=ocd_energy").status_code == 401
+    assert client.post("/predictions/api/predict-all", json={}).status_code == 401
+    assert client.post("/filters/options", json={}).status_code == 401
+    assert client.get("/download-csv").status_code == 302
+    assert client.get("/health").status_code == 200
+    assert client.get("/static/css/app.css").status_code == 200
+    assert b"Sign in" in client.get("/login").data
+
+    # Wrong password: stays out.
+    resp = client.post("/login", data={"password": "nope"})
+    assert resp.status_code == 401 and b"Incorrect password" in resp.data
+    assert client.get("/").status_code == 302
+
+    # Right password: redirected to the requested page, then everything works.
+    resp = client.post("/login", data={"password": "letmein", "next": "/?utility=Techiman"})
+    assert resp.status_code == 302 and resp.headers["Location"] == "/?utility=Techiman"
+    page = client.get("/")
+    assert page.status_code == 200 and b"Sign out" in page.data
+    assert client.get("/chart-data?metric=ocd_energy").status_code == 200
+    assert client.get("/login").status_code == 302  # already signed in
+
+    # Open redirects are not followed.
+    client.post("/logout")
+    resp = client.post("/login", data={"password": "letmein", "next": "https://evil.example"})
+    assert resp.headers["Location"] == "/"
+
+    # Sign out locks it again.
+    client.post("/logout")
+    assert client.get("/").status_code == 302
+
+
+def test_no_viewer_password_means_no_login(client):
+    assert client.get("/").status_code == 200
+    assert client.get("/login").status_code == 302  # nothing to log in to
+    assert b"Sign out" not in client.get("/").data
+
+
+def test_private_password_unlocks_private_view_on_a_public_deployment(tmp_path):
+    app = _make_app(tmp_path, public=True)
+    app.config["VIEWER_PASSWORD"] = "viewer-pw"
+    app.config["PRIVATE_PASSWORD"] = "private-pw"
+    client = app.test_client()
+
+    # Viewer password: public view, identifiers hidden.
+    client.post("/login", data={"password": "viewer-pw"})
+    page = client.get("/")
+    assert page.status_code == 200 and b"Public view" in page.data and b"Meter ID" not in page.data
+    assert b"predictionMeterSearch" not in client.get("/predictions").data
+    assert b"predictionMeterSearch" not in client.get("/predictions/private").data  # cannot be forced
+    assert client.post("/predictions/api/predict-all", json={"meterid": "11010000001"}).get_json()["scope"] == "all"
+
+    # Private password: same URLs, identifiers visible, meter search available.
+    client.post("/logout")
+    client.post("/login", data={"password": "private-pw"})
+    page = client.get("/")
+    assert page.status_code == 200 and b"Private view" in page.data and b"Meter ID" in page.data
+    assert b"/predictions/private" in page.data  # "See Predictions" links to the private page
+    assert b"predictionMeterSearch" in client.get("/predictions/private").data
+    assert client.post("/predictions/api/predict-all", json={"meterid": "11010000001"}).get_json()["scope"] == "meter"
+    assert b"Meter ID" not in client.get("/public-dashboard").data  # explicit public route stays public
+    assert b"predictionMeterSearch" not in client.get("/predictions").data  # explicit public route stays public
+
+    # Sign out drops the private access.
+    client.post("/logout")
+    assert client.get("/").status_code == 302
