@@ -1,30 +1,23 @@
-from flask import Blueprint, request, render_template, redirect, url_for, current_app
-from pathlib import Path
-from werkzeug.utils import secure_filename
-import logging
-import csv
+"""CSV upload and remote-refresh endpoints."""
 
-upload_bp = Blueprint("upload", __name__, template_folder="../../templates")
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from werkzeug.utils import secure_filename
+
+upload_bp = Blueprint("upload", __name__)
 
 ALLOWED_EXTENSIONS = {"csv"}
 logger = logging.getLogger("volta.upload")
 
 
 def _uploads_dir() -> Path:
-    glob_pat = current_app.config.get("CSV_GLOB", "data/*.csv")
-    p = Path(glob_pat)
-    uploads_dir = (p.parent if p.suffix else Path(glob_pat)).resolve()
+    uploads_dir = Path(current_app.config["UPLOADS_DIR"]).expanduser()
     uploads_dir.mkdir(parents=True, exist_ok=True)
     return uploads_dir
-
-ALLOWED_EXTENSIONS = {"csv"}
-logger = logging.getLogger("volta.upload")
-
-
-def _uploads_dir() -> Path:
-    glob_pat = current_app.config.get("CSV_GLOB", "data/uploads/*.csv")
-    p = Path(glob_pat)
-    return (p.parent if p.suffix else Path(glob_pat)).resolve()
 
 
 def allowed_file(filename: str) -> bool:
@@ -33,53 +26,37 @@ def allowed_file(filename: str) -> bool:
 
 @upload_bp.route("/upload", methods=["GET", "POST"])
 def upload_file():
-    if request.method == "POST":
-        if "file" not in request.files:
-            logger.warning("No file part in request")
-            return redirect(request.url)
+    if request.method == "GET":
+        return render_template("upload.html")
 
-        file = request.files["file"]
-        if file.filename == "":
-            logger.warning("No file selected")
-            return redirect(request.url)
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        flash("Please choose a CSV file to upload.", "warning")
+        return redirect(request.url)
+    if not allowed_file(file.filename):
+        flash("Only .csv files are supported.", "warning")
+        return redirect(request.url)
 
-        if not allowed_file(file.filename):
-            logger.warning("Unsupported file format")
-            return redirect(request.url)
+    filepath = _uploads_dir() / secure_filename(file.filename)
+    try:
+        file.save(str(filepath))
+        added = current_app.extensions["datastore"].ingest_csv(filepath)
+    except ValueError as exc:
+        flash(str(exc), "danger")
+        return redirect(request.url)
+    except Exception:  # noqa: BLE001
+        logger.exception("Error processing upload %s", filepath)
+        flash("The file could not be loaded. Check that its columns match the dataset.", "danger")
+        return redirect(request.url)
+    finally:
+        filepath.unlink(missing_ok=True)
 
-        try:
-            uploads_dir = _uploads_dir()
-            uploads_dir.mkdir(parents=True, exist_ok=True)
-            filename = secure_filename(file.filename)
-            filepath = uploads_dir / filename
-            file.save(str(filepath))
-            logger.info("Saved upload to %s", filepath)
-
-            # Read CSV into list-of-dicts
-            with open(filepath, newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                data_list = [dict(row) for row in reader]
-
-            # Load into datastore
-            datastore = current_app.extensions["datastore"]
-            datastore.load_data(data_list)  # <-- your datastore should implement load_data()
-
-            logger.info("Uploaded CSV loaded into DataStore successfully")
-
-            # Remove temporary file
-            filepath.unlink()
-            logger.info("Temporary uploaded CSV removed from server")
-            return redirect(url_for("dashboard.index"))
-
-        except Exception as e:
-            logger.error("Error processing upload: %s", e, exc_info=True)
-            return redirect(request.url)
-
-    return render_template("upload.html")
+    flash(f"Upload complete: {added:,} new rows added.", "success")
+    return redirect(url_for("dashboard.index"))
 
 
 @upload_bp.route("/try_connection", methods=["POST"])
 def try_connection():
-    datastore = current_app.extensions["datastore"]
-    success = datastore.try_internet_connection()
+    ok, message = current_app.extensions["datastore"].try_internet_connection()
+    flash(message, "success" if ok else "warning")
     return redirect(url_for("dashboard.index"))

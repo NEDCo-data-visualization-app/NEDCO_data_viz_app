@@ -1,20 +1,13 @@
-const DEFAULT_LIMIT = 200;
+import { debounce } from '../utils/debounce.js';
 
-function debounce(fn, delay = 250) {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
-}
+const DEFAULT_LIMIT = 200;
 
 function parseInitialOptions(raw) {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];
-  } catch (error) {
-    console.warn('Unable to parse initial meter options', error);
+  } catch {
     return [];
   }
 }

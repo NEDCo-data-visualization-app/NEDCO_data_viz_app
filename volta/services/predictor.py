@@ -7,8 +7,9 @@ import joblib
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
-import inspect
-import os
+import logging
+
+logger = logging.getLogger("volta.predictor")
 
 class PredictorLGBM:
     """
@@ -78,10 +79,10 @@ class PredictorLGBM:
             except Exception as e:
                 raise RuntimeError(f"Failed loading model for horizon {h}: {e}")
 
-        print(f"✔ Loaded individual LightGBM models (PID={os.getpid()}):")
-        print(f"   paymoney={len(self.models_paymoney)}")
-        print(f"   energy={len(self.models_energy)}")
-        print(f"   cash={len(self.models_cash)}")
+        logger.info(
+            "Loaded LightGBM models: paymoney=%s energy=%s cash=%s",
+            len(self.models_paymoney), len(self.models_energy), len(self.models_cash),
+        )
 
         # ----------------------------------------------------
         # Connect to DuckDB (optional)
@@ -93,11 +94,11 @@ class PredictorLGBM:
         if self.db_path is not None:
             try:
                 self.con = duckdb.connect(str(self.db_path))
-                print(f"✔ Connected to DuckDB at: {self.db_path}")
+                logger.info("Predictor connected to DuckDB at %s", self.db_path)
             except Exception as e:
                 raise RuntimeError(f"Failed to connect to DuckDB at {self.db_path}: {e}")
         else:
-            print("⚠ No DB path provided — predict_from_db() will be unavailable.")
+            logger.warning("No DB path provided; predict_from_db() will be unavailable.")
 
         # ----------------------------------------------------
         # Validate raw table exists (optional)
@@ -114,9 +115,8 @@ class PredictorLGBM:
                     f"Raw table '{self.raw_table}' does NOT exist in DuckDB.\n"
                     f"Available tables: {tables}"
                 )
-            print(f"✔ Raw table found: {self.raw_table}")
         elif self.con is not None and self.raw_table is None:
-            print("⚠ No raw_table provided — you must pass df_raw to predict_from_raw().")
+            logger.warning("No raw_table provided; predict_from_db() will be unavailable.")
 
 
     # ======================================================================
@@ -152,7 +152,6 @@ class PredictorLGBM:
             if res.empty or res["max_date"].iloc[0] is None:
                 raise RuntimeError(f"Could not determine max(od_date) from table {self.raw_table}.")
             as_of = str(res["max_date"].iloc[0])
-            print(f"Using inferred as_of = {as_of}")
 
         # -----------------------------------------
         # Build WHERE clause
@@ -191,11 +190,7 @@ class PredictorLGBM:
                 f"history_months={history_months}, meters={meters}."
             )
 
-        print(
-            f"Fetched {len(df_raw)} rows from {self.raw_table} "
-            f"(as_of={as_of}, history_months={history_months}, meters={'ALL' if meters is None else meters})"
-        )
-
+        logger.info("Fetched %s rows from %s (as_of=%s, history_months=%s)", len(df_raw), self.raw_table, as_of, history_months)
         return df_raw
     
 

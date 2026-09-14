@@ -1,59 +1,49 @@
+"""CSV export of the filtered dataset, streamed from DuckDB."""
+
 from __future__ import annotations
-from datetime import datetime
+
+import csv
+import io
+from datetime import datetime, timezone
+from typing import Iterable, Iterator, List
+
 from flask import Response, current_app, request
+
 from . import bp, get_datastore
 from .helpers import build_params
 
+
+def stream_csv(chunks: Iterable[tuple]) -> Iterator[str]:
+    """Turn (columns, rows) chunks from DataStore.stream_query into CSV text."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    header_written = False
+    for cols, rows in chunks:
+        if not header_written:
+            writer.writerow(cols)
+            header_written = True
+        writer.writerows(["" if v is None else v for v in row] for row in rows)
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+
+
+def csv_response(chunks: Iterable[tuple], filename: str) -> Response:
+    return Response(
+        stream_csv(chunks),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @bp.route("/download-csv", methods=["GET"])
 def download_csv():
-    """Download filtered dataset as CSV, streamed directly from DuckDB."""
     date_col = current_app.config["DATE_COL"]
     datastore = get_datastore()
-    columns = datastore.get_columns()
-
-    # Build FilterParams from request args
+    columns: List[str] = datastore.get_columns()
     params = build_params(request.args, base_columns=columns)
+    clause, sql_params = params.to_sql_where(date_col=date_col, available_columns=columns)
 
-    clause, sql_params = params.to_sql_where(
-        date_col=date_col,
-        available_columns=None,  # allow any column
-    )
-
-    sql = f'''
-        SELECT *
-        FROM "{current_app.config["PARQUET_PATH"]}"
-    '''
-    if clause:
-        sql += f" WHERE {clause}"
-    sql += f" ORDER BY {date_col}"
-
-    def generate():
-        """Stream CSV rows directly from DuckDB using generator."""
-        try:
-            rows = datastore.run_query(sql, sql_params, fetch_all=False)  # generator
-
-            # Header
-            first_row = next(rows, None)
-            if not first_row:
-                return  # nothing to yield
-            cols = list(first_row.keys())
-            yield ",".join(cols) + "\n"
-
-            # First row
-            yield ",".join("" if v is None else str(v) for v in first_row.values()) + "\n"
-
-            # Remaining rows
-            for row in rows:
-                yield ",".join("" if v is None else str(v) for v in row.values()) + "\n"
-        except Exception as e:
-            # Optional: log error here
-            pass
-
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    filename = f"export_{ts}.csv"
-
-    return Response(
-        generate(),
-        mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+    sql = f"SELECT * FROM {datastore.table_sql} WHERE {clause} ORDER BY {date_col}"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return csv_response(datastore.stream_query(sql, sql_params), f"export_{ts}.csv")

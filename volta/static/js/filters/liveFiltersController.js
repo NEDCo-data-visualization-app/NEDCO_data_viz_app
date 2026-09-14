@@ -1,19 +1,15 @@
+// Keeps the dashboard filter state in sync with the DOM, refreshes facet
+// options from the server as the user narrows the selection, and submits the
+// form with the chosen metrics / granularity.
+import { debounce } from '../utils/debounce.js';
+
 const state = {
   startDate: '',
   endDate: '',
   selections: new Map(),
-  metrics: new Set(),  // Changed: store multiple metrics as a Set
-  freq: null,
+  metrics: new Set(),
+  freq: 'M',
 };
-
-// Initialize metrics and freq from page
-document.querySelectorAll('.metric-checkbox:checked').forEach(cb => {
-  state.metrics.add(cb.value);
-});
-if (state.metrics.size === 0 && typeof defaultMetric !== 'undefined') {
-  state.metrics.add(defaultMetric);
-}
-state.freq = document.getElementById('freqSelect')?.value || 'M';
 
 const listeners = new Set();
 const renderers = new Map();
@@ -24,18 +20,9 @@ let formEl = null;
 let optionsEndpoint = '';
 let fetchController = null;
 let hiddenSyncContainer = null;
-
 let facetNames = [];
 
-function debounce(fn, delay = 350) {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
-}
-
-function escapeHtml(value) {
+export function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -45,9 +32,7 @@ function escapeHtml(value) {
 }
 
 function ensureSelectionSet(name) {
-  if (!state.selections.has(name)) {
-    state.selections.set(name, new Set());
-  }
+  if (!state.selections.has(name)) state.selections.set(name, new Set());
   return state.selections.get(name);
 }
 
@@ -56,84 +41,16 @@ function parseJsonList(value) {
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
-  } catch (err) {
-    console.warn('Failed to parse data-initial-selected', err);
+  } catch {
     return [];
   }
 }
 
-// ---------------- Submit ----------------
-function handleSubmit() {
-  if (!formEl) return;
-
-  const metricHidden = document.getElementById('metricHidden');
-  const freqHidden   = document.getElementById('freqHidden');
-
-  const startInput = formEl.querySelector('input[name="start_date"]');
-  const endInput   = formEl.querySelector('input[name="end_date"]');
-  if (startInput) startInput.value = state.startDate || '';
-  if (endInput)   endInput.value   = state.endDate   || '';
-
-  if (hiddenSyncContainer) hiddenSyncContainer.innerHTML = '';
-  state.selections.forEach((set, key) => {
-    for (const val of set) {
-      const i = document.createElement('input');
-      i.type  = 'hidden';
-      i.name  = key;
-      i.value = String(val);
-      hiddenSyncContainer.appendChild(i);
-    }
-  });
-
-  // Sync metric (comma-separated if multiple)
-  const metricValue = state.metrics.size > 0 
-    ? Array.from(state.metrics).join(',')
-    : (typeof defaultMetric !== 'undefined' ? defaultMetric : 'ocd_energy');
-    
-  if (metricHidden) {
-    metricHidden.value = metricValue;
-    console.log('[SUBMIT] Setting metricHidden.value to:', metricHidden.value);
-    console.log('[SUBMIT] metricHidden.name:', metricHidden.name);
-  } else {
-    console.error('[SUBMIT] metricHidden element not found!');
-  }
-  
-  // Sync freq
-  const freqValue = state.freq || 'M';
-  if (freqHidden) {
-    freqHidden.value = freqValue;
-    console.log('[SUBMIT] Setting freqHidden.value to:', freqHidden.value);
-    console.log('[SUBMIT] freqHidden.name:', freqHidden.name);
-  } else {
-    console.error('[SUBMIT] freqHidden element not found!');
-  }
-
-  // DEBUG: Log all form data before submit
-  const formData = new FormData(formEl);
-  console.log('[SUBMIT] Complete form data:');
-  for (let [key, value] of formData.entries()) {
-    console.log(`  ${key}: ${value}`);
-  }
-  
-  console.log('[SUBMIT] State before submit:', {
-    metrics: Array.from(state.metrics),
-    freq: state.freq,
-    selections: Object.fromEntries(
-      Array.from(state.selections.entries()).map(([k, v]) => [k, Array.from(v)])
-    )
-  });
-
-  formEl.submit();
-}
-
-// ---------------- Snapshot / State ----------------
 function buildSnapshot() {
   return {
     startDate: state.startDate,
     endDate: state.endDate,
-    selections: new Map(
-      Array.from(state.selections.entries(), ([key, set]) => [key, new Set(set)])
-    ),
+    selections: new Map(Array.from(state.selections.entries(), ([key, set]) => [key, new Set(set)])),
     metrics: new Set(state.metrics),
     freq: state.freq,
   };
@@ -141,28 +58,58 @@ function buildSnapshot() {
 
 function emitState() {
   const snapshot = buildSnapshot();
-  listeners.forEach(cb => {
-    try { cb(snapshot); }
-    catch (err) { console.error('Live filter listener error', err); }
+  listeners.forEach((cb) => {
+    try { cb(snapshot); } catch (err) { console.error('Live filter listener error', err); }
   });
 }
 
-// ---------------- Renderer ----------------
+// ---------------- Submit ----------------
+function handleSubmit() {
+  if (!formEl) return;
+
+  const startInput = formEl.querySelector('input[name="start_date"]');
+  const endInput = formEl.querySelector('input[name="end_date"]');
+  if (startInput) startInput.value = state.startDate || '';
+  if (endInput) endInput.value = state.endDate || '';
+
+  // Checkboxes that are not currently rendered (e.g. a meter that scrolled out
+  // of the search results) still need to be submitted, so mirror the state
+  // into hidden inputs and disable the live checkboxes to avoid duplicates.
+  hiddenSyncContainer.innerHTML = '';
+  formEl.querySelectorAll('[data-filter-list] input[type="checkbox"]').forEach((cb) => { cb.disabled = true; });
+  state.selections.forEach((set, key) => {
+    set.forEach((val) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = key;
+      input.value = String(val);
+      hiddenSyncContainer.appendChild(input);
+    });
+  });
+
+  const metricHidden = document.getElementById('metricHidden');
+  const freqHidden = document.getElementById('freqHidden');
+  if (metricHidden && state.metrics.size) metricHidden.value = Array.from(state.metrics).join(',');
+  if (freqHidden) freqHidden.value = state.freq || 'M';
+
+  formEl.submit();
+}
+
+// ---------------- Rendering ----------------
 function defaultRenderer(container, { name, options, selected }) {
   const selectedSet = selected instanceof Set ? selected : new Set(selected || []);
-  const merged = Array.from(new Set([...(selectedSet || new Set()), ...(options || [])]));
+  const merged = Array.from(new Set([...selectedSet, ...(options || [])]));
 
   if (!merged.length) {
     container.innerHTML = '<div class="text-muted small px-2 py-1">No options available</div>';
     return;
   }
 
-  container.innerHTML = merged.map(value => {
+  container.innerHTML = merged.map((value) => {
     const safeValue = escapeHtml(value);
-    const isChecked = selectedSet.has(value);
     return `
       <label class="filter-item">
-        <input type="checkbox" name="${escapeHtml(name)}" value="${safeValue}"${isChecked ? ' checked' : ''}>
+        <input type="checkbox" name="${escapeHtml(name)}" value="${safeValue}"${selectedSet.has(value) ? ' checked' : ''}>
         <span class="label-text">${safeValue}</span>
       </label>
     `;
@@ -183,13 +130,23 @@ export function registerFilterRenderer(name, renderer) {
   renderers.set(name, renderer);
   const container = listContainers.get(name);
   if (container) {
-    const options = latestOptions.get(name) || [];
-    const selected = state.selections.get(name) || new Set();
-    renderer(container, { name, options, selected });
+    renderer(container, { name, options: latestOptions.get(name) || [], selected: state.selections.get(name) || new Set() });
   }
 }
 
-// ---------------- Payload + Fetch ----------------
+export function setFilterOptions(name, options, { render = true } = {}) {
+  if (!name) return;
+  const normalized = Array.from(new Set((options || []).map(String)));
+  latestOptions.set(name, normalized);
+
+  const container = listContainers.get(name);
+  if (container && render) {
+    const renderer = renderers.get(name) || defaultRenderer;
+    renderer(container, { name, options: normalized, selected: state.selections.get(name) || new Set() });
+  }
+}
+
+// ---------------- Server refresh ----------------
 function buildRequestPayload() {
   const selections = {};
   state.selections.forEach((set, key) => { selections[key] = Array.from(set); });
@@ -197,189 +154,119 @@ function buildRequestPayload() {
     start_date: state.startDate || '',
     end_date: state.endDate || '',
     selections,
-    metric: Array.from(state.metrics).join(',') || (typeof defaultMetric !== 'undefined' ? defaultMetric : ''),
-    freq: state.freq || 'M',
+    facets: facetNames,
   };
 }
 
-const debouncedFetch = debounce(() => {
-  
-}, 350);
+async function fetchOptions() {
+  if (!optionsEndpoint || !facetNames.length) return;
+  if (fetchController) fetchController.abort();
+  fetchController = new AbortController();
 
-function scheduleRefresh() { if (optionsEndpoint) debouncedFetch(); }
+  try {
+    const response = await fetch(optionsEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildRequestPayload()),
+      signal: fetchController.signal,
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const options = (data && data.options) || {};
+    facetNames.forEach((name) => {
+      if (Array.isArray(options[name])) setFilterOptions(name, options[name]);
+    });
+  } catch (err) {
+    if (err.name !== 'AbortError') console.error('Failed to refresh filter options', err);
+  } finally {
+    fetchController = null;
+  }
+}
 
+const scheduleRefresh = debounce(fetchOptions, 350);
+
+export function refreshFilterOptionsNow() { fetchOptions(); }
+
+// ---------------- DOM bindings ----------------
 function handleCheckboxChange(event) {
   const input = event.target;
-  if (!(input instanceof HTMLInputElement) || input.type !== 'checkbox') return;
-  const { name, value } = input;
-  if (!name) return;
+  if (!(input instanceof HTMLInputElement) || input.type !== 'checkbox' || !input.name) return;
+  if (!listContainers.has(input.name)) return;
 
-  const set = ensureSelectionSet(name);
-  const strValue = String(value);
-  if (input.checked) set.add(strValue);
-  else set.delete(strValue);
+  const set = ensureSelectionSet(input.name);
+  if (input.checked) set.add(String(input.value));
+  else set.delete(String(input.value));
 
   emitState();
   scheduleRefresh();
 }
 
 function bindDateInput(input) {
-  const apply = () => {
+  const apply = debounce(() => {
     const value = input.value || '';
-    if (input.name === 'start_date' && state.startDate !== value) state.startDate = value;
-    if (input.name === 'end_date' && state.endDate !== value) state.endDate = value;
-    emitState(); scheduleRefresh();
-  };
-  const handler = debounce(apply, 200);
-  input.addEventListener('input', handler);
-  input.addEventListener('change', handler);
+    if (input.name === 'start_date') state.startDate = value;
+    if (input.name === 'end_date') state.endDate = value;
+    emitState();
+    scheduleRefresh();
+  }, 200);
+  input.addEventListener('input', apply);
+  input.addEventListener('change', apply);
 }
 
-// 🔑 Set options + restore metric/freq after render
-export function setFilterOptions(name, options, { render = true } = {}) {
-  console.log("[DEBUG] setFilterOptions called", { name, options });
-  if (!name) return;
-
-  const normalized = Array.from(new Set(options.map(String)));
-  latestOptions.set(name, normalized);
-
-  const container = listContainers.get(name);
-  if (container && render) {
-    const renderer = renderers.get(name) || defaultRenderer;
-    renderer(container, { name, options: normalized, selected: state.selections.get(name) || new Set() });
-
-    // 🔹 Restore metric + freq immediately after rendering
-    restoreMetricAndFreq();
-  }
-
-  console.log("[DEBUG] setFilterOptions completed for", name);
-}
-
-// 🔹 Restore metric/freq consistently
-function restoreMetricAndFreq() {
-  console.log('[RESTORE] Restoring metrics:', Array.from(state.metrics), 'freq:', state.freq);
-  
-  // Metric checkboxes - restore all selected metrics
-  document.querySelectorAll('.metric-checkbox').forEach(cb => {
-    cb.checked = state.metrics.has(cb.value);
-  });
-
-  // Frequency dropdown
-  const freqSelect = document.getElementById('freqSelect');
-  if (freqSelect && state.freq) {
-    const hasOption = Array.from(freqSelect.options).some(opt => opt.value === state.freq);
-    if (hasOption) {
-      freqSelect.value = state.freq;
-      console.log('[RESTORE] Set freq dropdown to:', state.freq);
-    }
-  }
-}
-
-
-// ---------------- Init ----------------
 export function initLiveFilters() {
   formEl = document.querySelector('[data-filters-form]');
   if (!formEl) return;
 
-  const metricHidden = document.getElementById('metricHidden');
-  const freqHidden   = document.getElementById('freqHidden');
   optionsEndpoint = formEl.dataset.optionsEndpoint || '';
 
   hiddenSyncContainer = document.createElement('div');
-  hiddenSyncContainer.style.display = 'none';
-  hiddenSyncContainer.setAttribute('data-sync-hidden', 'true');
+  hiddenSyncContainer.hidden = true;
   formEl.appendChild(hiddenSyncContainer);
 
-  // ---------------- Bind date inputs ----------------
-  formEl.querySelectorAll('input[type="date"]').forEach(bindDateInput);
+  formEl.querySelectorAll('input[type="date"]').forEach((input) => {
+    if (input.name === 'start_date') state.startDate = input.value || '';
+    if (input.name === 'end_date') state.endDate = input.value || '';
+    bindDateInput(input);
+  });
 
-  // ---------------- Initialize filter checkboxes ----------------
-  formEl.querySelectorAll('[data-filter-list][data-filter-name]').forEach(container => {
+  formEl.querySelectorAll('[data-filter-list][data-filter-name]').forEach((container) => {
     const name = container.dataset.filterName;
     if (!name) return;
-
     listContainers.set(name, container);
 
-    const initialSelected = parseJsonList(container.dataset.initialSelected);
     const set = ensureSelectionSet(name);
-    initialSelected.forEach(v => set.add(v));
-
-    container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-      if (cb.checked) set.add(cb.value);
-    });
+    parseJsonList(container.dataset.initialSelected).forEach((v) => set.add(v));
+    container.querySelectorAll('input[type="checkbox"]:checked').forEach((cb) => set.add(cb.value));
 
     if (name.toLowerCase() !== 'meterid') facetNames.push(name);
   });
 
   formEl.addEventListener('change', handleCheckboxChange);
 
-  // ---------------- Metric & Frequency ----------------
-  // Metric checkboxes
-  document.querySelectorAll('.metric-checkbox').forEach(cb => {
-    cb.addEventListener('change', () => {
-      // Update state.metrics Set based on checked boxes
-      const checkedBoxes = document.querySelectorAll('.metric-checkbox:checked');
-      state.metrics.clear();
-      checkedBoxes.forEach(checkbox => {
-        state.metrics.add(checkbox.value);
-      });
-      
-      // Update hidden input with comma-separated values
-      const metricValue = Array.from(state.metrics).join(',');
-      if (metricHidden) metricHidden.value = metricValue;
-      
-      console.log('[METRIC CHANGE] Updated metrics:', Array.from(state.metrics));
-      
-      debouncedFetch();  // refresh filter options with new metric
-    });
-  });
+  // Metric / granularity live in the charts card, outside the form.
+  const metricHidden = document.getElementById('metricHidden');
+  const freqHidden = document.getElementById('freqHidden');
+  const syncMetrics = () => {
+    state.metrics.clear();
+    document.querySelectorAll('.metric-checkbox:checked').forEach((cb) => state.metrics.add(cb.value));
+    if (metricHidden && state.metrics.size) metricHidden.value = Array.from(state.metrics).join(',');
+  };
+  document.querySelectorAll('.metric-checkbox').forEach((cb) => cb.addEventListener('change', syncMetrics));
+  syncMetrics();
 
-  // Frequency dropdown
   const freqSelect = document.getElementById('freqSelect');
   if (freqSelect) {
+    state.freq = freqSelect.value || 'M';
     freqSelect.addEventListener('change', () => {
       state.freq = freqSelect.value;
       if (freqHidden) freqHidden.value = state.freq;
-      
-      console.log('[FREQ CHANGE] Updated freq:', state.freq);
-
-      debouncedFetch(); // refresh filter options with new freq
     });
   }
 
-  // ---------------- Submit button ----------------
-  const submitButton = document.querySelector('#submitButton');
-  if (submitButton) {
-    console.log('[INIT] Submit button found, adding click handler');
-    submitButton.addEventListener('click', e => {
-      e.preventDefault();
-      console.log('[CLICK] Submit button clicked, calling handleSubmit');
-      handleSubmit();
-    });
-  } else {
-    console.error('[INIT] Submit button #submitButton not found!');
-  }
-  
-  // Also intercept form submission as a backup
-  if (formEl) {
-    formEl.addEventListener('submit', e => {
-      e.preventDefault();
-      console.log('[SUBMIT] Form submit event, calling handleSubmit');
-      handleSubmit();
-    });
-  }
+  formEl.addEventListener('submit', (e) => {
+    e.preventDefault();
+    handleSubmit();
+  });
 
-  // ---------------- Initial fetch ----------------
-  // Restore default metric/freq on first load
-  restoreMetricAndFreq();
-  debouncedFetch();
+  emitState();
 }
-
-
-export function refreshFilterOptionsNow() {
-  if (!optionsEndpoint) return;
-  if (fetchController) fetchController.abort();
-  debouncedFetch();
-}
-
-export { escapeHtml };

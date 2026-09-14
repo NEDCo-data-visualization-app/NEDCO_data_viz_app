@@ -1,28 +1,21 @@
-"""Development entry point for running the Volta dashboard."""
+"""Local entry point: boots the Flask app and opens a browser tab."""
 
 import os
-import sys
 import webbrowser
 from threading import Timer
-from volta.app import create_app
-from dotenv import load_dotenv
 
-if getattr(sys, "frozen", False):
-    load_dotenv(os.path.join(sys._MEIPASS, ".env"))
-else:
-    load_dotenv()  
+from volta.app import create_app
+
+HOST = os.getenv("VOLTA_HOST", "127.0.0.1")
+PORT = int(os.getenv("VOLTA_PORT", "5050"))
 
 app = create_app()
 
+
 def open_browser():
-    webbrowser.open_new("http://127.0.0.1:5050")
+    webbrowser.open_new(f"http://{HOST}:{PORT}")
+
 
 if __name__ == "__main__":
     Timer(1, open_browser).start()
-    app.run(
-        host="127.0.0.1",
-        port=5050,
-        use_reloader=False,  # <-- disables Flask auto-reloader
-        debug=False           # <-- ensures no debug reloader triggers
-    )
-
+    app.run(host=HOST, port=PORT, use_reloader=False, debug=False)

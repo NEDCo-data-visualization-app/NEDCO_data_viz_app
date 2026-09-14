@@ -5,31 +5,22 @@
   <div class="col-12 col-md-6 col-lg-4">
     <div class="card shadow-sm">
       <div class="card-body">
-        <h5 class="card-title mb-3">Internet Unavailable</h5>
-
-        {% with messages = get_flashed_messages() %}
-          {% if messages %}
-            {% for message in messages %}
-              <div class="alert alert-info alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-              </div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
+        <h5 class="card-title mb-2">No data loaded</h5>
+        <p class="text-muted small">
+          The dashboard has no dataset yet. Upload a CSV export, or fetch the latest
+          dataset if an internet connection and a remote source are available.
+        </p>
 
         <div class="d-grid gap-2 mb-3">
           <form method="POST" action="{{ url_for('upload.try_connection') }}">
-            <button class="btn btn-primary w-100" type="submit">
-              Try Internet Connection
-            </button>
+            <button class="btn btn-primary w-100" type="submit">Try Internet Connection</button>
           </form>
         </div>
 
         <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_file') }}">
           <div class="mb-3">
-            <label for="file" class="form-label">Please upload the csv below</label>
-            <input class="form-control" type="file" id="file" name="file" accept=".csv">
+            <label for="file" class="form-label">Upload a CSV file</label>
+            <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
           </div>
           <div class="d-grid gap-2">
             <button class="btn btn-success" type="submit">Upload</button>
