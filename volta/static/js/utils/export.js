@@ -24,8 +24,18 @@ export function downloadTableAsCSV(tableEl, filename) {
 export function downloadChart(chartId, filename) {
   const canvas = document.getElementById(chartId);
   if (!canvas) return;
+  // Chart canvases are transparent; export on white with a small margin so the
+  // image drops cleanly into a slide or document.
+  const margin = 16;
+  const out = document.createElement('canvas');
+  out.width = canvas.width + margin * 2;
+  out.height = canvas.height + margin * 2;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(canvas, margin, margin);
   const link = document.createElement('a');
-  link.href = canvas.toDataURL('image/png', 1.0);
+  link.href = out.toDataURL('image/png', 1.0);
   link.download = filename || (chartId + '.png');
   document.body.appendChild(link);
   link.click();

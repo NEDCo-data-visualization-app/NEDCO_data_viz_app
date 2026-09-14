@@ -1,64 +1,50 @@
-// Renders grouped bar chart for city or other segment comparisons.
-// Expects seriesList like: [{ labels: [...], values: [...], metric_label: '...' }, ...]
+// Horizontal bars: one metric by district, largest first.
+import { palette, valueAxis, categoryAxis, replaceChart, setEmptyState, formatFull } from './theme.js';
+
 export function drawBar(seriesList, canvasEl) {
   if (!window.Chart || !canvasEl) return;
 
-  const ctx = canvasEl.getContext('2d');
-  if (ctx._chart) ctx._chart.destroy();
-
-  if (!seriesList || !seriesList.length) {
-    canvasEl.parentElement.innerHTML =
-      '<div class="text-muted text-center py-4">No city data for current filters.</div>';
+  const series = Array.isArray(seriesList) ? seriesList[0] : null;
+  if (!series || !series.labels?.length) {
+    setEmptyState(canvasEl, 'No district data for the current filters.');
     return;
   }
+  setEmptyState(canvasEl, null);
 
-  const labelsSet = new Set();
-  seriesList.forEach(series => (series.labels || []).forEach(l => labelsSet.add(l)));
-  const labels = Array.from(labelsSet);
+  const label = series.metric_label || 'Total';
+  const horizontal = series.labels.length > 6;
 
-  const baseColors = ['#36A2EB', '#FF6384', '#4BC0C0', '#9966FF', '#FF9F40'];
-
-  const datasets = seriesList.map((series, i) => {
-    const data = labels.map(l => {
-      const idx = (series.labels || []).indexOf(l);
-      return idx >= 0 ? series.values[idx] : 0;
-    });
-    return {
-      label: series.metric_label || `Series ${i + 1}`,
-      data,
-      backgroundColor: baseColors[i % baseColors.length],
-      yAxisID: 'y'
-    };
-  });
-
-  const scales = {
-    x: {
-      title: { display: true, text: 'City' },
-      ticks: { maxRotation: 45, minRotation: 0 }
-    },
-    y: {
-        type: 'linear',
-        position: 'left',
-        beginAtZero: true,
-        ticks: { maxRotation: 0 }
-      }
-  };
-
-  ctx._chart = new Chart(ctx, {
+  replaceChart(canvasEl, {
     type: 'bar',
-    data: { labels, datasets },
+    data: {
+      labels: series.labels,
+      datasets: [
+        {
+          label,
+          data: series.values,
+          backgroundColor: palette.blue,
+          hoverBackgroundColor: palette.sky,
+          maxBarThickness: 24,
+          categoryPercentage: 0.7,
+          barPercentage: 0.9,
+          borderRadius: horizontal ? { topRight: 4, bottomRight: 4 } : { topLeft: 4, topRight: 4 },
+          borderSkipped: horizontal ? 'left' : 'bottom',
+        },
+      ],
+    },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales,
+      indexAxis: horizontal ? 'y' : 'x',
+      scales: horizontal
+        ? { x: valueAxis(label), y: categoryAxis(null, { autoSkip: false, maxTicksLimit: 50 }) }
+        : { x: categoryAxis(null, { autoSkip: false, maxTicksLimit: 50 }), y: valueAxis(label) },
       plugins: {
-        legend: { display: true },
+        legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (tt) => `${tt.dataset.label} (${tt.label}): ${tt.formattedValue}`
-          }
-        }
-      }
-    }
+            label: (item) => ` ${label}: ${formatFull(horizontal ? item.parsed.x : item.parsed.y)}`,
+          },
+        },
+      },
+    },
   });
 }

@@ -1,10 +1,9 @@
-<div class="card border-0 shadow-sm">
-  <div class="card-body">
-    <div class="table-responsive" style="overflow-x:auto; white-space:nowrap;">
-      {{ preview_html|safe }}
-    </div>
-    <button class="btn btn-outline-secondary btn-sm mt-2" onclick="downloadFilteredCSV()">
-      Download Table (CSV)
-    </button>
+<div class="card">
+  <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+    <span>Latest transactions <span class="text-muted small fw-normal">10 most recent for the current filters</span></span>
+    <button class="btn btn-outline-secondary btn-sm" type="button" onclick="downloadFilteredCSV()">Download all as CSV</button>
+  </div>
+  <div class="table-responsive">
+    {{ preview_html|safe }}
   </div>
 </div>

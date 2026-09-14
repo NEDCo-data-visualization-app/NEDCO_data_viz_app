@@ -1,131 +1,60 @@
-import { drawLine, drawLineTotals } from './drawLine.js';
+// Overview charts: one metric at a time (radio pills), three views of it.
+import { drawLineTotals } from './drawLine.js';
 import { drawPie } from './drawPie.js';
 import { drawBar } from './drawBar.js';
+import { applyChartTheme, setLoading } from './theme.js';
 import { urlWithFilters, updateUrlQuery } from '../utils/url.js';
 import { fetchJson } from '../utils/fetchJson.js';
 import { debounce } from '../utils/debounce.js';
 
-// sync dropdown button text
-function updateMetricDropdownText() {
-  const dropdownBtn = document.getElementById('metricDropdown');
-  const checkboxes = document.querySelectorAll('.metric-checkbox');
-  if (!dropdownBtn || !checkboxes.length) return;
-
-  const checked = Array.from(checkboxes).filter(cb => cb.checked);
-  if (checked.length === 0 && checkboxes[0]) checkboxes[0].checked = true;
-
-  const labels = Array.from(checkboxes)
-    .filter(cb => cb.checked)
-    .map(cb => cb.nextElementSibling ? cb.nextElementSibling.textContent : cb.value);
-
-  dropdownBtn.textContent = labels.join(', ');
-}
+const FREQ_WORD = { D: 'day', W: 'week', M: 'month' };
 
 export function initCharts() {
+  const radios = document.querySelectorAll('.metric-checkbox');
   const freqSelect = document.getElementById('freqSelect');
-  const lineEl     = document.getElementById('lineChart');
-  const lineTotalEl = document.getElementById('lineChartTotal');
-  const barEl      = document.getElementById('barChart');
-  const pieRow     = document.getElementById('pieChartsRow');
-  const checkboxes = document.querySelectorAll('.metric-checkbox');
-  const metricHidden = document.getElementById('metricHidden');
-  const freqHidden   = document.getElementById('freqHidden');
-  let refreshToken = 0;
-  if (!checkboxes.length || !freqSelect || !lineEl) return;
+  const lineEl = document.getElementById('lineChartTotal');
+  const barEl = document.getElementById('barChart');
+  const pieEl = document.getElementById('pieChart');
+  if (!radios.length || !lineEl) return;
 
-  checkboxes.forEach(cb => cb.addEventListener('change', updateMetricDropdownText));
+  applyChartTheme();
+
+  const metricHidden = document.getElementById('metricHidden');
+  const freqHidden = document.getElementById('freqHidden');
+  const metricLabels = document.querySelectorAll('[data-chart-metric-label]');
+  const freqLabels = document.querySelectorAll('[data-chart-freq-label]');
+  let token = 0;
 
   const refresh = debounce(async () => {
-    const token = ++refreshToken; 
-    const checkedBoxes = Array.from(checkboxes).filter(cb => cb.checked);
-    const metrics = checkedBoxes.map(cb => cb.value);
-    if (metricHidden) {
-        metricHidden.value = metrics.join(',');
-      }
-    const freq    = freqSelect.value;
-    if (freqHidden) {
-      freqHidden.value = freq;
-    }
-    const splitBy = document.querySelector('[data-splitby]:checked')?.value || null;
+    const current = ++token;
+    const checked = document.querySelector('.metric-checkbox:checked') || radios[0];
+    if (!checked) return;
+    const metric = checked.value;
+    const labelEl = document.querySelector(`label[for="${checked.id}"]`);
+    const label = labelEl ? labelEl.textContent.trim() : metric;
+    const freq = (freqSelect && freqSelect.value) || 'M';
 
-    updateUrlQuery(metrics.join(','), freq, splitBy);
-    if (!metrics.length) return;
+    metricLabels.forEach((el) => { el.textContent = label; });
+    freqLabels.forEach((el) => { el.textContent = FREQ_WORD[freq] || 'period'; });
+    if (metricHidden) metricHidden.value = metric;
+    if (freqHidden) freqHidden.value = freq;
+    updateUrlQuery(metric, freq, null);
 
-    // Line chart
-    const series = await fetchJson(urlWithFilters('/chart-data', {
-      metric: metrics.join(','),
-      freq,
-      split_by: splitBy
-    }));
-    drawLine(series, lineEl);
+    setLoading([lineEl, barEl, pieEl], true);
+    const [seriesData, barData, pieData] = await Promise.all([
+      fetchJson(urlWithFilters('/chart-data', { metric, freq, agg: 'sum' })),
+      barEl ? fetchJson(urlWithFilters('/bar-data', { metric })) : null,
+      pieEl ? fetchJson(urlWithFilters('/pie-data', { metric })) : null,
+    ]);
+    if (current !== token) return;
 
-    const totalSeries = await fetchJson(urlWithFilters('/chart-data', {
-      metric: metrics.join(','),
-      freq,
-      split_by: splitBy,
-      agg: 'sum'
-    }));
-    drawLineTotals(totalSeries, lineTotalEl);
+    drawLineTotals(seriesData, lineEl, { freq });
+    if (barEl) drawBar(barData, barEl);
+    if (pieEl) drawPie(pieData, pieEl);
+    setLoading([lineEl, barEl, pieEl], false);
+  }, 80);
 
-    // Pie charts
-    if (pieRow) {
-      pieRow.innerHTML = '';
-      for (let i = 0; i < metrics.length; i++) {
-        let chartId;
-        let colClass;
-        if (i === 0) {
-          chartId = "pieChart";
-        } else if (i === 1) {
-          chartId = "pieChart2";
-        } else {
-          chartId = "pieChart3";
-        }
-        if (metrics.length === 1){
-            colClass = "col-12";
-        } else if (metrics.length === 2){
-            colClass = "col-12 col-md-6";
-        } else {
-            colClass = "col-12 col-md-4";
-        }
-        const chartData = await fetchJson(urlWithFilters('/pie-data', { metric: metrics[i] }));
-        if (token !== refreshToken) return;
-        if (!chartData) continue;
-
-        const metricLabel = chartData.metric_label || metrics[i];
-
-        const col = document.createElement('div');
-        col.className = colClass;
-        col.innerHTML = `
-          <div class="card border-0 shadow-sm mb-3">
-            <div class="card-body">
-              <h6 class="mb-1">Composition by segment${metrics.length > 1 ? ' (' + metricLabel + ')' : ''}</h6>
-              <div class="text-muted small mb-2">Shares are based on the <strong>sum</strong> of the selected metric over current filters.</div>
-              <div class="chart-box"><canvas id="${chartId}"></canvas></div>
-              <button class="btn btn-outline-secondary btn-sm mt-2"
-                      onclick="downloadChart('${chartId}','composition_${metricLabel}.png')">
-                Download Chart
-              </button>
-            </div>
-          </div>
-        `;
-        pieRow.appendChild(col);
-        drawPie(chartData, document.getElementById(chartId));
-      }
-    }
-
-    // Bar chart
-    if (barEl && metrics.length) {
-    const barSeriesList = await fetchJson(
-      urlWithFilters('/bar-data', { metric: metrics.join(',') })
-    );
-    drawBar(barSeriesList, barEl); 
-  }
-  }, 100);
-
-  checkboxes.forEach(cb => cb.addEventListener('change', refresh));
-  freqSelect.addEventListener('change', refresh);
-  document.querySelectorAll('[data-splitby]').forEach(cb => cb.addEventListener('change', refresh));
-
-  updateMetricDropdownText();
-  setTimeout(refresh, 100);
+  radios.forEach((r) => r.addEventListener('change', refresh));
+  if (freqSelect) freqSelect.addEventListener('change', refresh);
+  refresh();
 }

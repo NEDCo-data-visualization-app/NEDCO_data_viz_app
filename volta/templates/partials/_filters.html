@@ -1,97 +1,69 @@
 {% import 'macros/ui.html' as ui %}
+{% set display_names = {'meterid': 'Meter number', 'utility': 'District', 'tariff_type': 'Account type'} %}
+{% set current_metric = args.get('metric') or default_metric %}
 
-<div class="sticky d-grid gap-5" style="max-height: 100vh; overflow-y: auto;">
-  <div class="card card-body shadow-sm">
-    <h5 class="card-title">Filters</h5>
-
-    <form id="filterForm" method="get" action="/"
+<div class="card filter-bar mb-4">
+  <div class="card-body py-3">
+    <form id="filterForm" method="get" action="{{ url_for('dashboard.index') }}"
           data-filters-form
           data-options-endpoint="{{ url_for('dashboard.filter_options') }}">
+      <div class="row g-2 align-items-end">
+        <div class="col-6 col-md-3 col-xl-2">
+          <label class="form-label" for="startDate">From</label>
+          <input type="date" class="form-control" id="startDate" name="start_date" value="{{ start_value }}">
+        </div>
+        <div class="col-6 col-md-3 col-xl-2">
+          <label class="form-label" for="endDate">To</label>
+          <input type="date" class="form-control" id="endDate" name="end_date" value="{{ end_value }}">
+        </div>
 
-      <!-- Date range -->
-      <div class="mb-3">
-        <label class="form-label">Starting date</label>
-        <input type="date" class="form-control" name="start_date" value="{{ start_value }}">
-      </div>
-      <div class="mb-3">
-        <label class="form-label">Ending date</label>
-        <input type="date" class="form-control" name="end_date" value="{{ end_value }}">
-      </div>
-
-      <hr class="my-3"/>
-
-      {% set display_names = {
-        'meterid': 'Meter Number',
-        'utility': 'Location',
-        'tariff_type': "Account Type"
-      } %}
-      <div class="accordion" id="filtersAccordion">
-        {% for col, vals in unique_values.items() %}
+        {% for col, vals in unique_values.items() if col|lower != 'meterid' %}
           {% set selected = args.getlist(col) %}
           {% set title = display_names.get(col|lower, col) %}
-
-          {% call ui.accordion_section(title=title) %}
-            {% if col|lower == 'meterid' %}
-              <div class="mb-2">
-                <input id="meteridSearch" type="text" class="form-control"
-                       placeholder="Search meterid (type to load)">
+          <div class="col-6 col-md-3 col-xl-2">
+            <label class="form-label">{{ title }}</label>
+            <div class="dropdown">
+              <button class="form-select text-start filter-toggle" type="button"
+                      data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                      data-filter-summary-for="{{ col }}">All</button>
+              <div class="dropdown-menu filter-menu">
+                {{ ui.checkbox_list(col, vals, selected, list_id=col ~ 'List', searchable=(vals|length > 8), placeholder='Search ' ~ title|lower) }}
               </div>
-              <div id="meteridList"
-                   class="filter-wrap"
-                   data-filter-list
-                   data-filter-name="{{ col }}"
-                   data-initial-selected='{{ selected | tojson | safe }}'
-                   data-dynamic-list="true"
-                   data-options-endpoint="{{ url_for('dashboard.options_meterid') }}">
-              </div>
-
-            {% elif col|lower == 'utility' %}
-              {{ ui.checkbox_list(col, vals, selected, list_id='locList', searchable=true, placeholder='Search location') }}
-
-            {% else %}
-              {{ ui.checkbox_list(col, vals, selected) }}
-            {% endif %}
-          {% endcall %}
+            </div>
+          </div>
         {% endfor %}
-      </div>
-      
-      <div class="d-grid gap-2 mt-3">
-        <input type="hidden" name="metric" id="metricHidden"
-       value="{{ current_metric }}">
-<input type="hidden" name="freq" id="freqHidden"
-       value="{{ args.get('freq', 'M') }}">
-        <button id="submitButton" class="btn btn-success" type="submit">Apply Filters</button>
-      </div>
-    </form>
 
-    <!-- Reset Dashboard Button -->
-    <form method="POST" action="{{ url_for('dashboard.reset_dashboard') }}">
-      <div class="d-grid gap-2 mt-2">
-        <button class="btn btn-secondary w-100" type="submit">Reset</button>
+        {% if 'meterid' in unique_values %}
+          {% set selected = args.getlist('meterid') %}
+          <div class="col-6 col-md-3 col-xl-2">
+            <label class="form-label">Meter number</label>
+            <div class="dropdown">
+              <button class="form-select text-start filter-toggle" type="button"
+                      data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                      data-filter-summary-for="meterid">All</button>
+              <div class="dropdown-menu filter-menu">
+                <input id="meteridSearch" type="search" class="form-control form-control-sm mb-2"
+                       placeholder="Type a meter number" autocomplete="off" aria-label="Search meter number">
+                <div id="meteridList"
+                     class="filter-wrap"
+                     data-filter-list
+                     data-filter-name="meterid"
+                     data-initial-selected='{{ selected | tojson | safe }}'
+                     data-dynamic-list="true"
+                     data-options-endpoint="{{ url_for('dashboard.options_meterid') }}"></div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+
+        <div class="col-12 col-xl-auto ms-xl-auto d-flex gap-2">
+          <input type="hidden" name="metric" id="metricHidden" value="{{ current_metric }}">
+          <input type="hidden" name="freq" id="freqHidden" value="{{ (args.get('freq') or 'M')|upper }}">
+          <button id="submitButton" class="btn btn-primary px-4" type="submit">Apply</button>
+          <button class="btn btn-outline-secondary" type="submit" form="resetForm">Reset</button>
+        </div>
       </div>
     </form>
+    <form id="resetForm" method="POST" action="{{ url_for('dashboard.reset_dashboard') }}" class="d-none"></form>
   </div>
-
-  {% if not is_public %}
-  <div class="card card-body shadow-sm">
-    <h5 class="card-title mb-3">Update Data</h5>
-    <div class="d-grid gap-2 mb-3">
-      <form method="POST" action="{{ url_for('upload.try_connection') }}">
-        <button class="btn btn-primary w-100" type="submit">
-          Try Internet Connection
-        </button>
-      </form>
-    </div>
-
-    <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_file') }}">
-      <div class="mb-3">
-        <label for="file" class="form-label">Upload a CSV to add rows to the dataset</label>
-        <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
-      </div>
-      <div class="d-grid gap-2">
-        <button class="btn btn-success" type="submit">Upload</button>
-      </div>
-    </form>
-  </div>
-  {% endif %}
 </div>

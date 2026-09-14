@@ -59,11 +59,15 @@ def create_app(config_object: Optional[Union[str, Mapping[str, Any], type]] = No
 
     @app.context_processor
     def _inject_globals():
+        gate = login_required_enabled()
+        signed_in = is_authenticated()
         return {
             "is_public": effective_public_mode(),
             "admin_token_required": bool(app.config.get("ADMIN_TOKEN")),
-            "show_logout": login_required_enabled() and is_authenticated(),
+            "show_logout": gate and signed_in,
+            "login_gate_active": gate and not signed_in,
             "private_session": has_private_access(),
+            "data_extent": app.extensions["datastore"].data_extent(),
             "flashes": get_flashed_messages(with_categories=True),
         }
 

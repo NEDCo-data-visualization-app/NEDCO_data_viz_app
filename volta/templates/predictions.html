@@ -1,15 +1,17 @@
 {% extends "base.html" %}
 {% import "macros/ui.html" as ui %}
 
+{% block title %}Forecasts · NEDCo Customer Dashboard{% endblock %}
 {% block content %}
 <div class="mb-4">
-  <h1 class="h3 mb-1">Predictions</h1>
+  <h1 class="h4 mb-1">Forecasts</h1>
+  <p class="text-muted small mb-0">Twelve-month projections of energy and payments from the LightGBM models, alongside monthly history.</p>
 </div>
 
 <div class="row g-4">
   <!-- Filters Column -->
   <div class="col-12 col-lg-4">
-    <div class="card shadow-sm h-100">
+    <div class="card h-100">
       <div class="card-header bg-transparent border-bottom-0 pb-0">
         <div class="d-flex align-items-center gap-2">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"
@@ -35,7 +37,7 @@
                 <button class="accordion-button bg-primary-subtle text-primary fw-semibold" type="button"
                         data-bs-toggle="collapse" data-bs-target="#meterNumberCollapse"
                         aria-expanded="true" aria-controls="meterNumberCollapse">
-                  Meter Number
+                  Meter number
                 </button>
               </h2>
               <div id="meterNumberCollapse" class="accordion-collapse collapse show"
@@ -44,7 +46,7 @@
                   <div class="mb-3">
                     <label for="predictionMeterSearch" class="form-label visually-hidden">Search Meter Number</label>
                     <input type="search" id="predictionMeterSearch" class="form-control"
-                          placeholder="Search meterid (type to load)" autocomplete="off"
+                          placeholder="Type a meter number" autocomplete="off"
                           aria-label="Search meter number" data-prediction-meter-search />
                   </div>
                   <input type="hidden" name="meterid" id="predictionSelectedMeter" data-prediction-meter-input />
@@ -84,13 +86,13 @@
                 <button class="accordion-button bg-primary-subtle text-primary fw-semibold" type="button"
                         data-bs-toggle="collapse" data-bs-target="#locationCollapse"
                         aria-expanded="true" aria-controls="locationCollapse">
-                  Location
+                  District
                 </button>
               </h2>
               <div id="locationCollapse" class="accordion-collapse collapse show"
                   aria-labelledby="locationHeading" data-bs-parent="#locationFilter">
                 <div class="accordion-body">
-                  {{ ui.checkbox_list('utility', location_options, selected_locations, list_id='predictionLocationList', searchable=true, placeholder='Search location') }}
+                  {{ ui.checkbox_list('utility', location_options, selected_locations, list_id='predictionLocationList', searchable=true, placeholder='Search district') }}
                 </div>
               </div>
             </div>
@@ -110,11 +112,11 @@
   <!-- Charts Column -->
   <div class="col-12 col-lg-8 d-flex flex-column gap-4">
     <!-- Energy Usage Chart -->
-    <div class="card shadow-sm">
+    <div class="card">
       <div class="card-body">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
           <div>
-            <h5 class="card-title mb-1">Energy Usage Forecast (kWh)</h5>
+            <h5 class="card-title mb-1">Energy forecast (kWh)</h5>
             <p class="text-muted small mb-0" data-chart-placeholder="kwh">
               Run Predict or Predict All to populate this chart.
             </p>
@@ -136,11 +138,11 @@
     </div>
 
     <!-- Paymoney & GHC Chart -->
-    <div class="card shadow-sm">
+    <div class="card">
       <div class="card-body">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
           <div>
-            <h5 class="card-title mb-1">Paymoney &amp; GHC Forecast</h5>
+            <h5 class="card-title mb-1">Amount paid &amp; cash received forecast (GH₵)</h5>
             <p class="text-muted small mb-0" data-chart-placeholder="payments">
               Run Predict or Predict All to populate this chart.
             </p>
@@ -166,7 +168,7 @@
 <!-- Prediction Table -->
 <div class="row g-4 mt-1">
   <div class="col-12">
-    <div class="card shadow-sm" data-prediction-results>
+    <div class="card" data-prediction-results>
       <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
         <h5 class="card-title mb-0">Prediction Preview</h5>
         <button type="button" class="btn btn-outline-secondary btn-sm"
