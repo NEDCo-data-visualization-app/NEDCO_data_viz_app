@@ -14,6 +14,7 @@ from flask import current_app, jsonify, make_response, render_template, request
 from markupsafe import escape
 from werkzeug.datastructures import ImmutableMultiDict
 
+from ..auth import effective_public_mode
 from . import bp, get_datastore, get_metrics, get_predictor
 from .downloads import csv_response
 from .helpers import DEFAULT_METERID_LIMIT, build_params, build_unique_values
@@ -48,7 +49,15 @@ COLUMN_CLASSES = {
 
 
 def _is_public(override: Optional[bool] = None) -> bool:
-    return bool(current_app.config.get("PUBLIC_MODE", False)) if override is None else override
+    """Public mode for this request.
+
+    Routes may force public (override=True), which always wins. Asking for the
+    private view (override=False) only works when the deployment runs in
+    private mode or the session signed in with the private password.
+    """
+    if override:
+        return True
+    return effective_public_mode()
 
 
 def _forecast_as_of() -> str:

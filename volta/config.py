@@ -11,6 +11,11 @@ root is honoured):
     SUPABASE_KEY   Optional API key sent with the BUCKET_URL request
     ADMIN_TOKEN    When set, CSV uploads and remote refreshes require this
                    token (use it for any deployment reachable by others)
+    VIEWER_PASSWORD  When set, every page requires signing in with this
+                   shared password (sessions last 30 days)
+    PRIVATE_PASSWORD Optional second password that also unlocks the private
+                   view (meter and customer identifiers) for that session
+    SESSION_COOKIE_SECURE  Set to true behind HTTPS (e.g. on Render)
     UPLOADS_DIR    Where uploaded CSVs are staged before ingestion
     MODEL_DIR      Folder containing the LightGBM pickles, default ``models``
     FORECAST_AS_OF Cut-off date separating history from forecast on the
@@ -25,6 +30,7 @@ import os
 import secrets
 import shutil
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -98,6 +104,11 @@ class Config:
     SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(16)
     PUBLIC_MODE = _env_flag("PUBLIC_MODE", False)
     ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or None
+    VIEWER_PASSWORD = os.getenv("VIEWER_PASSWORD") or None
+    PRIVATE_PASSWORD = os.getenv("PRIVATE_PASSWORD") or None
+    SESSION_COOKIE_SECURE = _env_flag("SESSION_COOKIE_SECURE", False)
+    SESSION_COOKIE_SAMESITE = "Lax"
+    PERMANENT_SESSION_LIFETIME = timedelta(days=30)
 
     # -------------------------
     # Data

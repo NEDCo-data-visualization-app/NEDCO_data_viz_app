@@ -12,6 +12,14 @@
   </head>
   <body>
     <div class="container-fluid py-3">
+      {% if show_logout %}
+        <form method="POST" action="{{ url_for('auth.logout') }}" class="d-flex justify-content-end align-items-center gap-2 mb-2">
+          <span class="badge rounded-pill text-bg-{{ 'warning' if private_session else 'secondary' }}">
+            {{ 'Private view' if private_session else 'Public view' }}
+          </span>
+          <button class="btn btn-link btn-sm text-decoration-none" type="submit">Sign out</button>
+        </form>
+      {% endif %}
       {% if flashes %}
         {% for category, message in flashes %}
           <div class="alert alert-{{ category or 'info' }} alert-dismissible fade show" role="alert">
