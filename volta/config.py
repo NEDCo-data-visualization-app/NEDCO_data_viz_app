@@ -137,9 +137,11 @@ class Config:
     EXCLUDE_COLS = {
         "od_date",
         "od_date_str",
+        "chargedate_str",
         "month",
         "month_str",
         "year",
+        "customer_no",
         "ocd_energy",
         "ocd_cash_received",
         "ocd_paymoney",

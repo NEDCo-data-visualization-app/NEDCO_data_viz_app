@@ -22,6 +22,25 @@ logger = logging.getLogger("volta")
 
 Row = Dict[str, Any]
 
+# Column names used by older exports of the same dataset (e.g. wkfile_shiny.csv),
+# mapped to the names the dashboard expects. Matching is case-insensitive.
+COLUMN_ALIASES = {
+    "chargedate": "od_date",
+    "charge_date": "od_date",
+    "date": "od_date",
+    "loc": "utility",
+    "location": "utility",
+    "res": "tariff_type",
+    "res_mapped": "tariff_type",
+    "kwh": "ocd_energy",
+    "energy": "ocd_energy",
+    "ghc": "ocd_cash_received",
+    "cash": "ocd_cash_received",
+    "cash_received": "ocd_cash_received",
+    "paymoney": "ocd_paymoney",
+    "pay_money": "ocd_paymoney",
+}
+
 
 def _sql_literal(value: str) -> str:
     """Quote a Python string as a SQL string literal."""
@@ -189,7 +208,18 @@ class DataStore:
         raw = f"read_csv_auto({_sql_literal(str(path))}, header=true, all_varchar=true)"
 
         with self._lock:
-            raw_cols = {r[0].lower(): r[0] for r in self._con.execute(f"DESCRIBE SELECT * FROM {raw}").fetchall()}
+            # Map canonical (lower-case) column name -> column name as it appears in the file.
+            # A column already using the canonical name wins over an alias for it.
+            raw_cols: Dict[str, str] = {}
+            aliased: Dict[str, str] = {}
+            for (name, *_rest) in self._con.execute(f"DESCRIBE SELECT * FROM {raw}").fetchall():
+                lower = name.lower()
+                if lower in COLUMN_ALIASES:
+                    aliased.setdefault(COLUMN_ALIASES[lower], name)
+                else:
+                    raw_cols[lower] = name
+            for canonical, original in aliased.items():
+                raw_cols.setdefault(canonical, original)
             exists = self.table_exists()
 
             if exists:
@@ -197,7 +227,13 @@ class DataStore:
                 target = [(name, typ) for name, typ, *_ in schema if name.lower() in raw_cols]
             else:
                 inferred = self._con.execute(f"DESCRIBE SELECT * FROM {raw_typed}").fetchall()
-                target = [(name.lower(), "DATE" if name.lower() == date_col else typ) for name, typ, *_ in inferred]
+                by_original = {orig: canon for canon, orig in raw_cols.items()}
+                target = []
+                for name, typ, *_ in inferred:
+                    canonical = by_original.get(name)
+                    if canonical is None:
+                        continue  # an alias shadowed by a canonical column
+                    target.append((canonical, "DATE" if canonical == date_col else typ))
 
             if not target:
                 raise ValueError("The CSV has no columns in common with the dataset.")
