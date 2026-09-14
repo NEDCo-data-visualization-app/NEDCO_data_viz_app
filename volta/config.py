@@ -16,6 +16,9 @@ root is honoured):
     PRIVATE_PASSWORD Optional second password that also unlocks the private
                    view (meter and customer identifiers) for that session
     SESSION_COOKIE_SECURE  Set to true behind HTTPS (e.g. on Render)
+    DUCKDB_MEMORY_LIMIT / DUCKDB_THREADS  Cap DuckDB's memory (e.g. "256MB")
+                   and parallelism so it spills to disk instead of exceeding a
+                   small container's memory
     UPLOADS_DIR    Where uploaded CSVs are staged before ingestion
     MODEL_DIR      Folder containing the LightGBM pickles, default ``models``
     FORECAST_AS_OF Cut-off date separating history from forecast on the
@@ -116,6 +119,9 @@ class Config:
     DB_PATH = str(resolve_data_path(os.getenv("DB_PATH") or "data/warehouse_new.duckdb", copy_from_bundle=True))
     PARQUET_PATH = os.getenv("PARQUET_PATH") or "merged_sales_customers_clean"
     UPLOADS_DIR = Path(os.getenv("UPLOADS_DIR") or (Path.home() / "Downloads" / "volta" / "uploads"))
+
+    DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT") or None
+    DUCKDB_THREADS = int(os.getenv("DUCKDB_THREADS")) if os.getenv("DUCKDB_THREADS") else None
 
     DATE_COL = os.getenv("VOLTA_DATE_COL", "od_date")
     DATE_FMT = os.getenv("VOLTA_DATE_FMT", "%d-%b-%y")
