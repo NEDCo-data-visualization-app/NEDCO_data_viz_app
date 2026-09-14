@@ -49,7 +49,11 @@ def create_app(config_object: Optional[Union[str, Mapping[str, Any], type]] = No
 
     @app.context_processor
     def _inject_globals():
-        return {"is_public": app.config.get("PUBLIC_MODE", False), "flashes": get_flashed_messages(with_categories=True)}
+        return {
+            "is_public": app.config.get("PUBLIC_MODE", False),
+            "admin_token_required": bool(app.config.get("ADMIN_TOKEN")),
+            "flashes": get_flashed_messages(with_categories=True),
+        }
 
     return app
 

@@ -11,13 +11,21 @@
           dataset if an internet connection and a remote source are available.
         </p>
 
+        {% if admin_token_required %}
+        <div class="mb-3">
+          <label for="adminToken" class="form-label">Admin token</label>
+          <input class="form-control" type="password" id="adminToken" autocomplete="off"
+                 placeholder="Required to change the dataset" data-admin-token>
+        </div>
+        {% endif %}
+
         <div class="d-grid gap-2 mb-3">
-          <form method="POST" action="{{ url_for('upload.try_connection') }}">
+          <form method="POST" action="{{ url_for('upload.try_connection') }}" data-needs-token>
             <button class="btn btn-primary w-100" type="submit">Try Internet Connection</button>
           </form>
         </div>
 
-        <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_file') }}">
+        <form method="POST" enctype="multipart/form-data" action="{{ url_for('upload.upload_file') }}" data-needs-token>
           <div class="mb-3">
             <label for="file" class="form-label">Upload a CSV file</label>
             <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
@@ -30,4 +38,25 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if admin_token_required %}
+<script>
+  // Copy the admin token into each form as a hidden field on submit.
+  document.querySelectorAll('form[data-needs-token]').forEach((form) => {
+    form.addEventListener('submit', () => {
+      const token = document.querySelector('[data-admin-token]');
+      let hidden = form.querySelector('input[name="token"]');
+      if (!hidden) {
+        hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'token';
+        form.appendChild(hidden);
+      }
+      hidden.value = token ? token.value : '';
+    });
+  });
+</script>
+{% endif %}
 {% endblock %}

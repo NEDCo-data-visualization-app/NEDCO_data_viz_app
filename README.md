@@ -10,6 +10,7 @@ VoltaV is a Flask-based analytics dashboard for the Northern Electricity Distrib
 - [Configuration](#configuration)
 - [Running the app](#running-the-app)
 - [Working with data](#working-with-data)
+- [Deploying to Render](#deploying-to-render)
 - [Dashboard walkthrough](#dashboard-walkthrough)
 - [Forecasting & predictions](#forecasting--predictions)
 - [Development tips](#development-tips)
@@ -78,6 +79,10 @@ PUBLIC_MODE="false"
 BUCKET_URL=""
 SUPABASE_KEY=""
 
+# When set, uploads and remote refreshes require this token (set it on any
+# deployment other people can reach)
+ADMIN_TOKEN=""
+
 # Where uploaded CSVs are staged before ingestion (deleted afterwards)
 UPLOADS_DIR="~/Downloads/volta/uploads"
 
@@ -112,6 +117,19 @@ The command loads environment variables, boots the Flask app, and opens your bro
 3. **Uploading CSVs** – Use the **Update Data** card on the dashboard (or `/upload`). The CSV must contain the date column; other columns are matched by name (case-insensitive) and cast to the table's types. Rows that already exist are skipped. With no dataset present, the upload creates the table.
 4. **Remote refresh** – With `BUCKET_URL` set, **Try Internet Connection** downloads that parquet file and replaces the dataset. Without it the button only reports whether the machine is online.
 5. **Schema expectations** – The dashboard assumes numeric columns for each configured metric (`ocd_energy`, `ocd_paymoney`, `ocd_cash_received` by default) and uses `od_date` for date filtering. Update `volta/config.py` if your dataset uses different column names.
+
+## Deploying to Render
+The repo contains a [Render Blueprint](render.yaml) that runs the dashboard in **public mode** from the `Dockerfile`, with the DuckDB warehouse on a persistent disk.
+
+1. In Render choose **New → Blueprint**, connect this GitHub repository and pick the branch to deploy. Render reads `render.yaml` and creates a `voltav-dashboard` web service (Starter plan; persistent disks are not available on the free plan).
+2. Wait for the first deploy, then open the service URL. With no data yet you land on the upload page.
+3. Copy `ADMIN_TOKEN` from the service's **Environment** tab. It is generated automatically and is required for anything that changes the dataset.
+4. Load the data, either by uploading a CSV export on the upload page (paste the token in the *Admin token* field), or by setting `BUCKET_URL` / `SUPABASE_KEY` in the Environment tab and pressing **Try Internet Connection**. The dataset persists on the disk across deploys.
+
+Notes:
+- The image excludes `models/` and `notebooks/` to stay small, so the prediction cache cannot be generated on Render; the predictions page shows history only unless a pre-populated warehouse is loaded.
+- In public mode the dashboard hides meter and customer identifiers and the *Update Data* card; the upload page at `/upload` stays available for operators with the token.
+- The service runs a single Gunicorn worker because DuckDB permits one writer per file.
 
 ## Dashboard walkthrough
 - **Filters panel** – Stickied on the left, providing date pickers, accordion-based categorical filters, a meter ID search, and quick-reset controls.

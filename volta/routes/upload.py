@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 from pathlib import Path
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from werkzeug.utils import secure_filename
 
 upload_bp = Blueprint("upload", __name__)
@@ -24,11 +25,23 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _require_admin_token() -> None:
+    """Reject writes without the configured ADMIN_TOKEN (no-op when none is configured)."""
+    expected = current_app.config.get("ADMIN_TOKEN")
+    if not expected:
+        return
+    supplied = request.form.get("token") or request.headers.get("X-Admin-Token") or ""
+    if not hmac.compare_digest(str(supplied), str(expected)):
+        logger.warning("Rejected %s without a valid admin token", request.path)
+        abort(403)
+
+
 @upload_bp.route("/upload", methods=["GET", "POST"])
 def upload_file():
     if request.method == "GET":
         return render_template("upload.html")
 
+    _require_admin_token()
     file = request.files.get("file")
     if file is None or not file.filename:
         flash("Please choose a CSV file to upload.", "warning")
@@ -57,6 +70,7 @@ def upload_file():
 
 @upload_bp.route("/try_connection", methods=["POST"])
 def try_connection():
+    _require_admin_token()
     ok, message = current_app.extensions["datastore"].try_internet_connection()
     flash(message, "success" if ok else "warning")
     return redirect(url_for("dashboard.index"))

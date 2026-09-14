@@ -9,6 +9,8 @@ root is honoured):
     PUBLIC_MODE    ``true`` hides meter identifiers from the UI
     BUCKET_URL     Optional remote parquet export used by "Try Internet Connection"
     SUPABASE_KEY   Optional API key sent with the BUCKET_URL request
+    ADMIN_TOKEN    When set, CSV uploads and remote refreshes require this
+                   token (use it for any deployment reachable by others)
     UPLOADS_DIR    Where uploaded CSVs are staged before ingestion
     MODEL_DIR      Folder containing the LightGBM pickles, default ``models``
     FORECAST_AS_OF Cut-off date separating history from forecast on the
@@ -95,6 +97,7 @@ class Config:
 
     SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(16)
     PUBLIC_MODE = _env_flag("PUBLIC_MODE", False)
+    ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or None
 
     # -------------------------
     # Data

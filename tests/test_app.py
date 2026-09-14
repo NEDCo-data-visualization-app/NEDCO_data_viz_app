@@ -163,3 +163,32 @@ def test_predict_all_cache_populates_and_serves(client):
     assert one["scope"] == "meter" and one["row_count"] == 12 and len(one["charts"]["forecast"]) == 12
     body = client.get("/predictions/download?meterid=11010000001").get_data(as_text=True)
     assert body.count("\n") == 13
+
+
+def test_admin_token_guards_write_endpoints(tmp_path):
+    app = _make_app(tmp_path, public=True)
+    app.config["ADMIN_TOKEN"] = "s3cret"
+    client = app.test_client()
+
+    # Public dashboard no longer shows the Update Data card; the upload page asks for the token.
+    assert b"Update Data" not in client.get("/").data
+    assert b"Admin token" in client.get("/upload").data
+
+    csv = _csv_bytes(_synthetic_rows(n_meters=1))
+    denied = client.post("/upload", data={"file": (io.BytesIO(csv), "x.csv")}, content_type="multipart/form-data")
+    assert denied.status_code == 403
+    assert client.post("/try_connection").status_code == 403
+    assert client.post("/try_connection", data={"token": "wrong"}).status_code == 403
+
+    allowed = client.post("/upload", data={"file": (io.BytesIO(csv), "x.csv"), "token": "s3cret"},
+                          content_type="multipart/form-data", follow_redirects=True)
+    assert allowed.status_code == 200 and b"new rows added" in allowed.data
+    assert client.post("/try_connection", headers={"X-Admin-Token": "s3cret"}).status_code == 302
+
+
+def test_gunicorn_entrypoint_exposes_app(monkeypatch, tmp_path):
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "w.duckdb"))
+    import importlib
+    import run
+    importlib.reload(run)
+    assert run.app.name == "volta.app"
