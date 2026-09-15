@@ -9,3 +9,4 @@ lightgbm
 scikit-learn
 openpyxl
 xlrd
+python-pptx

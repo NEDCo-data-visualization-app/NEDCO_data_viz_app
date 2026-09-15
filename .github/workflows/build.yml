@@ -67,6 +67,7 @@ jobs:
             --name volta_macos_public \
             --add-data "volta/templates:volta/templates" \
             --add-data "volta/static:volta/static" \
+            --collect-data pptx \
             --add-data ".env:." \
             --add-data "data:./data" \
             --copy-metadata duckdb \
@@ -110,6 +111,7 @@ jobs:
             --name volta_macos_private \
             --add-data "volta/templates:volta/templates" \
             --add-data "volta/static:volta/static" \
+            --collect-data pptx \
             --add-data ".env:." \
             --add-data "data:./data" \
             --copy-metadata duckdb \
@@ -151,6 +153,7 @@ jobs:
             --name volta_windows_public `
             --add-data "volta/templates;volta/templates" `
             --add-data "volta/static;volta/static" `
+            --collect-data pptx `
             --add-data ".env;." `
             --add-data "data;data" `
             --copy-metadata duckdb `
@@ -192,6 +195,7 @@ jobs:
             --name volta_windows_private `
             --add-data "volta/templates;volta/templates" `
             --add-data "volta/static;volta/static" `
+            --collect-data pptx `
             --add-data ".env;." `
             --add-data "data;data" `
             --copy-metadata duckdb `

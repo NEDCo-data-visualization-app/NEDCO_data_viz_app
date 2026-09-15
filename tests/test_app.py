@@ -639,3 +639,53 @@ def test_upload_reports_out_of_memory_plainly(client, monkeypatch):
                     content_type="multipart/form-data", follow_redirects=True)
     assert "ran out of memory" in r.get_data(as_text=True)
     assert client.get("/health").get_json()["rows"] == 793  # unchanged
+
+
+# ----------------------------------------------------------- PowerPoint export
+def _deck_text(data: bytes) -> str:
+    from pptx import Presentation
+
+    prs = Presentation(io.BytesIO(data))
+    chunks = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                chunks.append(shape.text_frame.text)
+            if shape.has_table:
+                chunks.extend(cell.text for row in shape.table.rows for cell in row.cells)
+            if shape.has_chart:
+                chunks.append("CHART:" + ",".join(shape.chart.plots[0].categories))
+                if shape.chart.has_title:
+                    chunks.append(shape.chart.chart_title.text_frame.text)
+    return "\n".join(chunks)
+
+
+def test_pptx_export_for_current_filters(client):
+    from pptx import Presentation
+
+    r = client.get("/export/pptx?start_date=2019-01-01&end_date=2019-12-31&utility=Techiman&tariff_type=Residential")
+    assert r.status_code == 200
+    assert r.mimetype == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    assert 'filename="nedco_brief_2019-01-01_2019-12-31.pptx"' in r.headers["Content-Disposition"]
+    prs = Presentation(io.BytesIO(r.data))
+    assert len(prs.slides) == 7
+    text = _deck_text(r.data)
+    assert "Customer sales brief" in text and "1 Jan 2019 to 31 Dec 2019 (12 months)" in text
+    assert "District: Techiman" in text and "Account type: Residential" in text
+    assert "Change versus 1 Jan 2018 to 31 Dec 2018" in text
+    assert "CHART:2019-01,2019-02" in text  # monthly series
+    assert "Techiman" in text and "Energy sold (kWh)" in text  # district chart and table
+    assert "Data through Sep 2020" in text
+    assert "Download PowerPoint" in client.get("/").get_data(as_text=True)
+
+
+def test_pptx_export_public_view_and_empty_selection(tmp_path):
+    public = _make_app(tmp_path, public=True).test_client()
+    text = _deck_text(public.get("/export/pptx?meterid=11010000001").data)
+    assert "Meter number" not in text and "11010000001" not in text  # identifiers stay out of a public deck
+    empty = public.get("/export/pptx?start_date=2030-01-01&end_date=2030-12-31")
+    assert empty.status_code == 200
+    assert "No transactions match these filters" in _deck_text(empty.data)
+    (tmp_path / "e").mkdir()
+    no_data = _make_app(tmp_path / "e", with_data=False).test_client()
+    assert no_data.get("/export/pptx").status_code == 200
