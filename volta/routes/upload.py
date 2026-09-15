@@ -6,6 +6,7 @@ import hmac
 import logging
 from pathlib import Path
 
+import duckdb
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from werkzeug.utils import secure_filename
 
@@ -57,6 +58,11 @@ def upload_file():
         added = current_app.extensions["datastore"].ingest_csv(filepath, replace=replace)
     except ValueError as exc:
         flash(str(exc), "danger")
+        return redirect(request.url)
+    except duckdb.OutOfMemoryException:
+        logger.exception("Out of memory while loading %s", filepath)
+        flash("The server ran out of memory while loading the file; the dataset was left unchanged. "
+              "Raise DUCKDB_MEMORY_LIMIT slightly or use a larger instance.", "danger")
         return redirect(request.url)
     except Exception:  # noqa: BLE001
         logger.exception("Error processing upload %s", filepath)

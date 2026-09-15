@@ -630,3 +630,12 @@ def test_chunked_ingest_matches_whole_file(tmp_path, monkeypatch):
                     content_type="multipart/form-data", follow_redirects=True)
     assert "0 new rows added" in r.get_data(as_text=True)
     assert client.get("/health").get_json()["rows"] == len(rows)
+
+
+def test_upload_reports_out_of_memory_plainly(client, monkeypatch):
+    ds = client.application.extensions["datastore"]
+    monkeypatch.setattr(ds, "ingest_csv", lambda *a, **k: (_ for _ in ()).throw(duckdb.OutOfMemoryException("boom")))
+    r = client.post("/upload", data={"file": (io.BytesIO(b"od_date,ocd_energy\n2021-01-01,1\n"), "a.csv")},
+                    content_type="multipart/form-data", follow_redirects=True)
+    assert "ran out of memory" in r.get_data(as_text=True)
+    assert client.get("/health").get_json()["rows"] == 793  # unchanged
