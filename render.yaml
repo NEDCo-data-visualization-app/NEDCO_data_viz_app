@@ -22,10 +22,12 @@ services:
         value: merged_sales_customers_clean
       - key: UPLOADS_DIR
         value: /app/data/uploads
-      # The Starter instance has 512 MB. Keep DuckDB well inside it so a big
-      # CSV ingest spills to the disk instead of triggering an OOM restart.
+      # The Starter instance has 512 MB. DuckDB uses roughly this cap plus
+      # 200 MB while loading a large CSV (measured with a 5-million-row file),
+      # and the web process needs about 200 MB of its own, so 100 MB keeps a
+      # full replace of the dataset under the limit.
       - key: DUCKDB_MEMORY_LIMIT
-        value: 200MB
+        value: 100MB
       - key: DUCKDB_THREADS
         value: "2"
       - key: SECRET_KEY

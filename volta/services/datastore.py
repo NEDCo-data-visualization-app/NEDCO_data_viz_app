@@ -8,8 +8,10 @@ on it; long streaming reads use a dedicated cursor instead.
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -40,6 +42,45 @@ COLUMN_ALIASES = {
     "paymoney": "ocd_paymoney",
     "pay_money": "ocd_paymoney",
 }
+
+
+CHUNK_BYTES = 48 * 1024 * 1024  # size of the slices a CSV upload is loaded in
+
+
+def split_csv(path: Path, chunk_bytes: int = CHUNK_BYTES) -> List[Path]:
+    """Split a CSV into slices of about ``chunk_bytes``, each with the header.
+
+    Slices only start at a line boundary that is outside a quoted field, so a
+    value containing a newline is never cut in half. A file smaller than one
+    slice is used as is.
+    """
+    path = Path(path)
+    if path.stat().st_size <= chunk_bytes:
+        return [path]
+    parts: List[Path] = []
+    stem = f"{path.stem}.{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    with open(path, "rb") as src:
+        header = src.readline()
+        out = None
+        written = 0
+        in_quotes = False
+        try:
+            for line in src:
+                if out is None or (written >= chunk_bytes and not in_quotes):
+                    if out is not None:
+                        out.close()
+                    out = open(path.with_name(f"{stem}.part{len(parts):04d}{path.suffix}"), "wb")
+                    parts.append(Path(out.name))
+                    out.write(header)
+                    written = 0
+                out.write(line)
+                written += len(line)
+                if line.count(b'"') % 2:
+                    in_quotes = not in_quotes
+        finally:
+            if out is not None:
+                out.close()
+    return parts
 
 
 def _sql_literal(value: str) -> str:
@@ -94,10 +135,28 @@ class DataStore:
 
     def table_exists(self) -> bool:
         with self._lock:
-            row = self._con.execute(
-                "SELECT 1 FROM information_schema.tables WHERE table_name = ?", [self.table]
-            ).fetchone()
+            return self._table_exists(self._con)
+
+    def _table_exists(self, con) -> bool:
+        row = con.execute("SELECT 1 FROM information_schema.tables WHERE table_name = ?", [self.table]).fetchone()
         return row is not None
+
+    def health(self) -> Dict[str, Any]:
+        """Liveness information that never waits on a running query or ingest."""
+        info: Dict[str, Any] = {"ok": True, "table": self.table, "busy": False, "rows": None, "cols": None}
+        if not self._lock.acquire(blocking=False):
+            info["busy"] = True  # an ingest or a long query holds the connection; the process is alive
+            return info
+        try:
+            if self._table_exists(self._con):
+                extent = self.data_extent()
+                info["rows"] = extent.get("rows")
+                info["cols"] = len(self.get_columns())
+            else:
+                info["rows"], info["cols"] = 0, 0
+        finally:
+            self._lock.release()
+        return info
 
     def invalidate(self) -> None:
         self._columns = None
@@ -237,25 +296,37 @@ class DataStore:
 
     # ------------------------------------------------------------- ingestion
     def ingest_csv(self, path: Union[str, Path], replace: bool = False) -> int:
-        """Append the rows of a CSV file to the dataset table and return how many were added.
+        """Load the rows of a CSV file into the dataset table and return how many were added.
 
         Columns are matched by name (case-insensitive) against the existing
         table and cast to its types; the date column also accepts DATE_FMT.
         Rows already present are skipped. If the table does not exist yet, or
         ``replace`` is set, the table is (re)created from the file, so new
         columns such as customer attributes come through.
+
+        The file is loaded in slices of about CHUNK_BYTES each so that memory
+        stays bounded whatever the file size (a 500 MB export on a 512 MB
+        instance must not get the service killed). A replace builds a new
+        table beside the old one and swaps them at the end, so readers keep
+        the old data until the whole file is in, and a failed load leaves the
+        dataset untouched.
         """
+        path = Path(path)
         date_col = self.date_col.lower()
         # DDL statements cannot be prepared in DuckDB, so literals are inlined (escaped).
         raw_typed = f"read_csv_auto({_sql_literal(str(path))}, header=true)"
         raw = f"read_csv_auto({_sql_literal(str(path))}, header=true, all_varchar=true)"
 
-        with self._lock:
+        # A dedicated cursor (its own DuckDB connection) so that dashboard reads and
+        # the /health probe keep working while a large file is being loaded.
+        cur = self._con.cursor()
+        chunks: List[Path] = []
+        try:
             # Map canonical (lower-case) column name -> column name as it appears in the file.
             # A column already using the canonical name wins over an alias for it.
             raw_cols: Dict[str, str] = {}
             aliased: Dict[str, str] = {}
-            for (name, *_rest) in self._con.execute(f"DESCRIBE SELECT * FROM {raw}").fetchall():
+            for (name, *_rest) in cur.execute(f"DESCRIBE SELECT * FROM {raw}").fetchall():
                 lower = name.lower()
                 if lower in COLUMN_ALIASES:
                     aliased.setdefault(COLUMN_ALIASES[lower], name)
@@ -263,13 +334,13 @@ class DataStore:
                     raw_cols[lower] = name
             for canonical, original in aliased.items():
                 raw_cols.setdefault(canonical, original)
-            exists = self.table_exists() and not replace
+            exists = self._table_exists(cur) and not replace
 
             if exists:
-                schema = self._con.execute(f"DESCRIBE {self.table_sql}").fetchall()
+                schema = cur.execute(f"DESCRIBE {self.table_sql}").fetchall()
                 target = [(name, typ) for name, typ, *_ in schema if name.lower() in raw_cols]
             else:
-                inferred = self._con.execute(f"DESCRIBE SELECT * FROM {raw_typed}").fetchall()
+                inferred = cur.execute(f"DESCRIBE SELECT * FROM {raw_typed}").fetchall()
                 by_original = {orig: canon for canon, orig in raw_cols.items()}
                 target = []
                 for name, typ, *_ in inferred:
@@ -295,21 +366,64 @@ class DataStore:
                     exprs.append(f'{src} AS "{name}"')
                 else:
                     exprs.append(f'TRY_CAST({src} AS {typ}) AS "{name}"')
-
             cols_sql = ", ".join(f'"{n}"' for n, _ in target)
-            staged = f'SELECT * FROM (SELECT {", ".join(exprs)} FROM {raw}) s WHERE s."{self.date_col}" IS NOT NULL'
+            date_sql = f'"{next(n for n, _ in target if n.lower() == date_col)}"'
 
+            def staged(chunk: Path) -> str:
+                source = f"read_csv_auto({_sql_literal(str(chunk))}, header=true, all_varchar=true)"
+                return f'SELECT * FROM (SELECT {", ".join(exprs)} FROM {source}) s WHERE s.{date_sql} IS NOT NULL'
+
+            chunks = split_csv(path, CHUNK_BYTES)
+            added = 0
             if exists:
-                sql = (
-                    f"INSERT INTO {self.table_sql} ({cols_sql}) "
-                    f"(({staged}) EXCEPT (SELECT {cols_sql} FROM {self.table_sql}))"
-                )
-                result = self._con.execute(sql).fetchone()
-                added = int(result[0]) if result else 0
+                for chunk in chunks:
+                    # Rows already present are skipped. Only the part of the table that
+                    # overlaps the slice's date range can hold duplicates, which keeps
+                    # the comparison small for a monthly update of a multi-year table.
+                    sql = (
+                        f"INSERT INTO {self.table_sql} ({cols_sql}) "
+                        f"WITH incoming AS ({staged(chunk)}) "
+                        f"SELECT * FROM incoming EXCEPT SELECT {cols_sql} FROM {self.table_sql} "
+                        f"WHERE {date_sql} BETWEEN (SELECT MIN({date_sql}) FROM incoming) "
+                        f"AND (SELECT MAX({date_sql}) FROM incoming)"
+                    )
+                    result = cur.execute(sql).fetchone()
+                    added += int(result[0]) if result else 0
+                    if chunk != path:
+                        chunk.unlink(missing_ok=True)
             else:
-                self._con.execute(f"CREATE OR REPLACE TABLE {self.table_sql} AS {staged}")
-                result = self._con.execute(f"SELECT COUNT(*) FROM {self.table_sql}").fetchone()
-                added = int(result[0]) if result else 0
+                incoming = f'"{self.table}__incoming"'
+                cur.execute(f"DROP TABLE IF EXISTS {incoming}")
+                try:
+                    cur.execute(f"CREATE TABLE {incoming} AS {staged(chunks[0])}")
+                    if chunks[0] != path:
+                        chunks[0].unlink(missing_ok=True)
+                    for chunk in chunks[1:]:
+                        cur.execute(f"INSERT INTO {incoming} ({cols_sql}) {staged(chunk)}")
+                        if chunk != path:
+                            chunk.unlink(missing_ok=True)
+                    result = cur.execute(f"SELECT COUNT(*) FROM {incoming}").fetchone()
+                    added = int(result[0]) if result else 0
+                except Exception:
+                    cur.execute(f"DROP TABLE IF EXISTS {incoming}")  # the current dataset stays as it was
+                    raise
+                # Swap the finished table in under the global lock so no reader
+                # sees the dataset half-way through.
+                with self._lock:
+                    cur.execute("BEGIN")
+                    cur.execute(f"DROP TABLE IF EXISTS {self.table_sql}")
+                    cur.execute(f"ALTER TABLE {incoming} RENAME TO {self.table_sql}")
+                    cur.execute("COMMIT")
+                    self.invalidate()
+            try:
+                cur.execute("CHECKPOINT")  # flush the WAL so a restart does not replay a huge load
+            except Exception as exc:  # noqa: BLE001 - only possible while other transactions run
+                logger.info("Checkpoint deferred: %s", exc)
+        finally:
+            for chunk in chunks:
+                if chunk != path:  # slices are ours to delete; the upload itself belongs to the caller
+                    chunk.unlink(missing_ok=True)
+            cur.close()
 
         self.invalidate()
         logger.info("Ingested %s rows from %s", added, path)
