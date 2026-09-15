@@ -10,12 +10,13 @@ import { initPredictionActions } from './predictions/predictionActions.js';
 import { initPredictionCharts } from './predictions/predictionCharts.js';
 
 // Table + chart export helpers
-import { downloadTableAsCSV, downloadChart, downloadCurrentTable, downloadFilteredCSV } from './utils/export.js';
+import { downloadTableAsCSV, downloadChart, downloadCurrentTable, downloadFilteredCSV, downloadPptx } from './utils/export.js';
 
 // Expose export helpers globally for inline buttons
 window.downloadChart = downloadChart;
 window.downloadCurrentTable = downloadCurrentTable;
 window.downloadFilteredCSV = downloadFilteredCSV;
+window.downloadPptx = downloadPptx;
 
 document.addEventListener('DOMContentLoaded', () => {
   initLiveFilters();

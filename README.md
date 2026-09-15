@@ -150,6 +150,7 @@ Notes:
   - *Average price* – amount paid divided by energy sold (GH₵/kWh), a realised-tariff check.
   - *Residential* – share of active customers on a residential account type.
 - **Charts** – One metric at a time (energy, amount paid, cash received): total over time, by district, and share by account type. Each chart downloads as a PNG on a white background.
+- **Download PowerPoint** (button next to the key figures) – A seven-slide brief for the current filters: title with the headline numbers, the six key figures with their change versus the previous period, energy and amount paid per month, by district (chart and table), share by account type, and a definitions slide. Charts are native PowerPoint charts, so the deck can be edited after export. The public view never includes meter numbers in the filter description.
 - **Summary statistics** – Per-transaction sum, mean, median, min and max for each metric.
 - **Data table** – A preview of the most recent filtered records, with export of the full filtered result as CSV.
 - **Update data** – In the private view, the navigation links to the upload page (CSV append or refresh from the remote source).

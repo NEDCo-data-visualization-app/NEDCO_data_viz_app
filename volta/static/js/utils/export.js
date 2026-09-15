@@ -55,3 +55,7 @@ export function downloadFilteredCSV() {
   const url = urlWithFilters('/download-csv');
   window.location.assign(url);
 }
+
+export function downloadPptx() {
+  window.location.assign(urlWithFilters('/export/pptx'));
+}

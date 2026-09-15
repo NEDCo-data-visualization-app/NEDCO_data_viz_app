@@ -42,6 +42,8 @@
       {% set compare_label = 'no earlier period to compare with' %}
     {% endif %}
     <span class="text-muted small">{{ period_label }} &middot; {{ compare_label }}</span>
+    <button class="btn btn-outline-primary btn-sm ms-auto" type="button" onclick="downloadPptx()"
+            title="A PowerPoint brief with these key figures and charts, for the current filters">Download PowerPoint</button>
   </div>
 
   <div class="row g-3">
