@@ -98,9 +98,9 @@ class DataStore:
 
         self.db_path = Path(config["DB_PATH"])
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
         self._con = duckdb.connect(database=str(self.db_path), read_only=False)
         self._apply_resource_limits()
-        self._lock = threading.RLock()
         self._columns: Optional[List[str]] = None
         self._extent: Optional[Dict[str, Any]] = None
         logger.info("DuckDB opened at %s (table %s)", self.db_path, self.table)
@@ -162,6 +162,23 @@ class DataStore:
         self._columns = None
         self._extent = None
 
+    def reopen(self) -> None:
+        """Close and reopen the DuckDB connection.
+
+        After a large load the connection keeps a buffer pool's worth of the
+        freshly written blocks (about the memory limit plus metadata); on a
+        small hosted instance that headroom is needed for the next page
+        view. Reopening releases it.
+        """
+        with self._lock:
+            try:
+                self._con.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Closing DuckDB before reopening failed: %s", exc)
+            self._con = duckdb.connect(database=str(self.db_path), read_only=False)
+            self._apply_resource_limits()
+            self.invalidate()
+
     def data_extent(self) -> Dict[str, Any]:
         """Row count and date span of the dataset, cached until the data changes."""
         if self._extent is None:
@@ -217,7 +234,8 @@ class DataStore:
         self, sql: str, params: Optional[Sequence[Any]] = None, chunk_size: int = 5000
     ) -> Iterator[Tuple[List[str], List[tuple]]]:
         """Yield (columns, chunk_of_tuples) using a dedicated cursor, for large exports."""
-        cur = self._con.cursor()
+        with self._lock:
+            cur = self._con.cursor()
         try:
             cur.execute(sql, list(params or []))
             cols = [c[0] for c in cur.description]
@@ -235,7 +253,7 @@ class DataStore:
 
     # ------------------------------------------------------------ aggregates
     def compute_stats(self, where_clause: str = "", sql_params: Optional[Sequence[Any]] = None) -> Dict[str, Dict[str, Union[float, str]]]:
-        """Sum / mean / median / min / max for every configured metric present in the table."""
+        """Sum / mean / approximate median / min / max for every configured metric present in the table."""
         columns = set(self.get_columns())
         metrics = [m for m in self.metrics.keys() if m in columns]
         if not metrics:
@@ -243,9 +261,11 @@ class DataStore:
 
         parts = []
         for m in metrics:
+            # approx_quantile (t-digest) runs in constant memory; an exact median
+            # sorts every row and was the largest memory spike of a page view.
             parts.append(
                 f"SUM({m}) AS sum_{m}, AVG({m}) AS avg_{m}, MIN({m}) AS min_{m}, MAX({m}) AS max_{m}, "
-                f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {m}) AS median_{m}"
+                f"approx_quantile({m}, 0.5) AS median_{m}"
             )
         sql = f"SELECT {', '.join(parts)} FROM {self.table_sql}"
         if where_clause:
@@ -319,7 +339,8 @@ class DataStore:
 
         # A dedicated cursor (its own DuckDB connection) so that dashboard reads and
         # the /health probe keep working while a large file is being loaded.
-        cur = self._con.cursor()
+        with self._lock:
+            cur = self._con.cursor()
         chunks: List[Path] = []
         try:
             # Map canonical (lower-case) column name -> column name as it appears in the file.
@@ -425,7 +446,7 @@ class DataStore:
                     chunk.unlink(missing_ok=True)
             cur.close()
 
-        self.invalidate()
+        self.reopen()  # release the buffers held for the load
         logger.info("Ingested %s rows from %s", added, path)
         return added
 
