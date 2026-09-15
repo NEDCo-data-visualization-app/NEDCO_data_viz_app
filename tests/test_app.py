@@ -521,3 +521,112 @@ def test_upload_replace_mode_brings_new_columns(client):
     assert "Dataset replaced" in text and "Data through Mar 2021" in text
     assert client.get("/customers/11010000020").status_code == 404  # old meters are gone
     assert "Kofi" in client.get("/customers/11010000001").get_data(as_text=True)
+
+
+# ------------------------------------------------------------ ingest liveness
+def test_health_never_waits_for_a_busy_datastore(client):
+    import threading
+
+    ds = client.application.extensions["datastore"]
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold_lock():
+        with ds._lock:
+            holding.set()
+            release.wait(10)
+
+    t = threading.Thread(target=hold_lock)
+    t.start()
+    holding.wait(5)
+    try:
+        health = client.get("/health").get_json()  # must return at once, not block behind the lock
+        assert health["ok"] is True and health["busy"] is True
+    finally:
+        release.set()
+        t.join()
+    health = client.get("/health").get_json()
+    assert health["ok"] is True and health["busy"] is False and health["rows"] == 793
+
+
+def test_dashboard_and_health_stay_available_during_an_ingest(tmp_path):
+    import threading
+
+    app = _make_app(tmp_path)
+    ds = app.extensions["datastore"]
+    rows = _synthetic_rows(n_meters=400, start=dt.date(2021, 1, 1), end=dt.date(2021, 12, 31))
+    path = tmp_path / "big.csv"
+    path.write_bytes(_csv_bytes(rows))
+
+    result = {}
+
+    def ingest():
+        result["added"] = ds.ingest_csv(path)
+
+    t = threading.Thread(target=ingest)
+    t.start()
+    client = app.test_client()
+    statuses = set()
+    while t.is_alive():
+        statuses.add(client.get("/health").status_code)
+        statuses.add(client.get("/?utility=Wenchi").status_code)
+    t.join()
+    assert statuses == {200}
+    assert result["added"] == len(rows)
+    assert client.get("/health").get_json()["rows"] == 793 + len(rows)
+
+
+def test_split_csv_keeps_quoted_newlines_together(tmp_path):
+    from volta.services.datastore import split_csv
+
+    header = b"a,b\n"
+    rows = [b'%d,"line one\nline two"\n' % i if i % 3 == 0 else b"%d,x\n" % i for i in range(2000)]
+    path = tmp_path / "quoted.csv"
+    path.write_bytes(header + b"".join(rows))
+    parts = split_csv(path, chunk_bytes=4000)
+    assert len(parts) > 3
+    for part in parts:
+        text = part.read_bytes()
+        assert text.startswith(header)
+        assert text.count(b'"') % 2 == 0  # no quoted field was cut in half
+    assert sum(len(p.read_bytes()) - len(header) for p in parts) == sum(len(r) for r in rows)
+    assert split_csv(path, chunk_bytes=10_000_000) == [path]  # small files are used as they are
+
+
+def test_replace_ingest_is_atomic(tmp_path, monkeypatch):
+    from volta.services import datastore as dsmod
+
+    app = _make_app(tmp_path)
+    ds = app.extensions["datastore"]
+    rows = _synthetic_rows(n_meters=2, start=dt.date(2021, 1, 1), end=dt.date(2021, 2, 1))
+    path = tmp_path / "new.csv"
+    path.write_bytes(_csv_bytes(rows))
+
+    # A slice that cannot be read fails the load; the old dataset must survive untouched.
+    monkeypatch.setattr(dsmod, "split_csv", lambda p, chunk_bytes=0: [p, tmp_path / "missing.csv"])
+    with pytest.raises(Exception):
+        ds.ingest_csv(path, replace=True)
+    assert ds.fetch_one("SELECT COUNT(*) AS n FROM merged_sales_customers_clean")["n"] == 793
+    assert not any("incoming" in r["name"] for r in ds.run_query("SHOW TABLES"))
+
+    monkeypatch.undo()
+    assert ds.ingest_csv(path, replace=True) == len(rows)
+    assert ds.fetch_one("SELECT COUNT(*) AS n FROM merged_sales_customers_clean")["n"] == len(rows)
+    assert not any("incoming" in r["name"] for r in ds.run_query("SHOW TABLES"))
+
+
+def test_chunked_ingest_matches_whole_file(tmp_path, monkeypatch):
+    from volta.services import datastore as dsmod
+
+    monkeypatch.setattr(dsmod, "CHUNK_BYTES", 5_000)  # force many slices on a small file
+    client = _make_app(tmp_path, with_data=False).test_client()
+    rows = _synthetic_rows(n_meters=30, start=dt.date(2019, 1, 1), end=dt.date(2019, 12, 31))
+    body = _csv_bytes(rows)
+    assert len(body) > 5 * 5_000
+    client.post("/upload", data={"file": (io.BytesIO(body), "a.csv")}, content_type="multipart/form-data")
+    assert client.get("/health").get_json()["rows"] == len(rows)
+    # Appending the same file again adds nothing (duplicates across slices are caught).
+    r = client.post("/upload", data={"file": (io.BytesIO(body), "a.csv"), "mode": "append"},
+                    content_type="multipart/form-data", follow_redirects=True)
+    assert "0 new rows added" in r.get_data(as_text=True)
+    assert client.get("/health").get_json()["rows"] == len(rows)
