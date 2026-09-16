@@ -74,6 +74,7 @@ PARQUET_PATH="merged_sales_customers_clean"
 
 # Hide meter identifiers from the UI
 PUBLIC_MODE="false"
+SHOW_FORECASTS="false"   # true shows the Forecasts tab and its API
 
 # Optional remote parquet export used by "Try Internet Connection"
 BUCKET_URL=""
@@ -156,6 +157,8 @@ Notes:
 - **Update data** – In the private view, the navigation links to the upload page (CSV append or refresh from the remote source).
 
 ## Forecasting & predictions
+The Forecasts page and its API are hidden by default. Set `SHOW_FORECASTS=true` to show the tab again (the forecasting models are not part of the current release scope).
+
 - **Accessing the view** – Click **See Predictions** on the main dashboard. The private view (`/predictions/private`) adds a meter search; the public view (`/predictions`) only filters by location.
 - **Where the numbers come from** – The page reads the `predict_all_cache` table in the DuckDB file. Charts show monthly history up to `FORECAST_AS_OF` (solid line) and the cached forecast after it (dashed line); the table preview and the CSV download come from the same table.
 - **Populating the cache** – `POST /predictions/api/predict-all-cache` runs the 36 LightGBM models for every meter (using each meter's latest 24 months of history), replaces the cache, and returns the same payload as *Predict All*. It needs the `models/` folder and can take a while on the full dataset; it is not wired to a button yet.

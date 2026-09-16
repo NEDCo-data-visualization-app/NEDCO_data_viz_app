@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from flask import current_app, jsonify, make_response, render_template, request, url_for
+from flask import abort, current_app, jsonify, make_response, render_template, request, url_for
 from markupsafe import escape
 from werkzeug.datastructures import ImmutableMultiDict
 
@@ -189,6 +189,13 @@ def index(first_load_override: Optional[bool] = None, is_public: Optional[bool] 
 
 
 # ---------------------------------------------------------------- predictions
+@bp.before_request
+def _forecasts_gate():
+    """The forecasting pages and API stay out of the site unless SHOW_FORECASTS is on."""
+    if request.path.startswith("/predictions") and not current_app.config.get("SHOW_FORECASTS", False):
+        abort(404)
+
+
 def _ensure_predict_all_cache_table(datastore) -> None:
     datastore.execute(
         """

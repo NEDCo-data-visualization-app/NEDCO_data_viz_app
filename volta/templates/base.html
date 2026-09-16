@@ -29,10 +29,12 @@
         <div class="collapse navbar-collapse" id="mainNav">
           <ul class="navbar-nav me-auto ms-md-3">
             <li class="nav-item"><a class="nav-link{{ ' active' if on_overview }}" href="{{ url_for('dashboard.index') }}">Overview</a></li>
+            {% if show_forecasts %}
             <li class="nav-item">
               <a class="nav-link{{ ' active' if on_forecasts }}"
                  href="{{ url_for('dashboard.predictions_public' if is_public else 'dashboard.predictions_private') }}">Forecasts</a>
             </li>
+            {% endif %}
             {% if not is_public %}
             <li class="nav-item"><a class="nav-link{{ ' active' if request.endpoint in ('dashboard.customers', 'dashboard.customer') }}" href="{{ url_for('dashboard.customers') }}">Customers</a></li>
             <li class="nav-item"><a class="nav-link{{ ' active' if request.endpoint == 'upload.upload_file' }}" href="{{ url_for('upload.upload_file') }}">Update data</a></li>
