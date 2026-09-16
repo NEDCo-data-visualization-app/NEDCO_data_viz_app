@@ -708,3 +708,53 @@ def test_forecasts_hidden_unless_enabled(tmp_path):
     shown = create_app({**base, "SHOW_FORECASTS": True}).test_client()
     assert "Forecasts" in shown.get("/").get_data(as_text=True)
     assert shown.get("/predictions").status_code == 200
+
+
+# ------------------------------------------------------------------ watch list
+def test_watchlist_scores_and_filters(tmp_path):
+    client = _make_app_with_details(tmp_path).test_client()
+    page = client.get("/watchlist").get_data(as_text=True)
+    assert "Meters flagged" in page and 'href="/customers/11019999999"' in page  # the meter that stopped buying
+    assert "Inactive over a year" in page and "Watch list</a>" in page
+    # The dormant meter is flagged as inactive (16 months) and scored 1; the filter narrows to it.
+    only = client.get("/watchlist?signal=inactive").get_data(as_text=True)
+    assert 'href="/customers/11019999999"' in only and only.count('href="/customers/') == 1
+    none = client.get("/watchlist?utility=Wenchi&signal=inactive").get_data(as_text=True)
+    assert "No meters match these filters" in none
+    csv = client.get("/watchlist.csv?signal=inactive").get_data(as_text=True).splitlines()
+    assert csv[0].startswith("meterid,customer_no,utility,tariff_type,score,signals,shortfall_kwh,last_purchase")
+    assert len(csv) == 2 and csv[1].startswith("11019999999,501009999999,Techiman,Residential,1,Inactive over a year")
+    # Signals on the watch list agree with the account page rules.
+    account = client.get("/customers/11019999999").get_data(as_text=True)
+    assert "No purchases for 16 months" in account
+
+
+def test_inspection_outcomes_persist_and_show(tmp_path):
+    client = _make_app_with_details(tmp_path).test_client()
+    r = client.post("/customers/11019999999/inspection",
+                    data={"outcome": "bypass", "note": "Cable bridged around the meter", "recorded_by": "K. Mensah"},
+                    follow_redirects=True)
+    text = r.get_data(as_text=True)
+    assert "Inspection outcome saved" in text and "Bypass or tampering found" in text
+    assert "Cable bridged around the meter" in text and "K. Mensah" in text
+    listed = client.get("/watchlist?inspected=yes").get_data(as_text=True)
+    assert 'href="/customers/11019999999"' in listed and "Bypass or tampering found" in listed
+    assert 'href="/customers/11019999999"' not in client.get("/watchlist?inspected=no").get_data(as_text=True)
+    assert "Choose an outcome" in client.post("/customers/11019999999/inspection", data={"outcome": ""},
+                                              follow_redirects=True).get_data(as_text=True)
+    # Outcomes survive a dataset replace and the list is rebuilt for the new data.
+    rows = _synthetic_rows(n_meters=2, start=dt.date(2021, 1, 1), end=dt.date(2021, 12, 31))
+    client.post("/upload", data={"file": (io.BytesIO(_csv_bytes(rows)), "n.csv"), "mode": "replace"},
+                content_type="multipart/form-data", follow_redirects=True)
+    page = client.get("/watchlist").get_data(as_text=True)
+    assert "of 2 meters" in page and "Dec 2021" in page
+    ds = client.application.extensions["datastore"]
+    assert ds.fetch_one("SELECT COUNT(*) AS n FROM inspections")["n"] == 1
+
+
+def test_watchlist_is_private_only(tmp_path):
+    public = _make_app(tmp_path, public=True).test_client()
+    assert public.get("/watchlist").status_code == 403
+    assert public.get("/watchlist.csv").status_code == 403
+    assert public.post("/customers/11010000001/inspection", data={"outcome": "nothing"}).status_code == 403
+    assert "Watch list" not in public.get("/").get_data(as_text=True)

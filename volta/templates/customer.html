@@ -135,6 +135,41 @@
       </ul>
       <div class="card-footer small text-muted">Indicators from purchase patterns, not evidence. A low figure can also mean a solar system, a vacant property or a second meter.</div>
     </div>
+
+    <div class="card mt-3">
+      <div class="card-header">Inspection outcome</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('dashboard.record_inspection', meterid=a.meterid) }}">
+          <div class="mb-2">
+            <label class="form-label" for="inspOutcome">What did the visit find?</label>
+            <select class="form-select" id="inspOutcome" name="outcome" required>
+              <option value="">Choose an outcome</option>
+              {% for key, label in outcomes %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="inspNote">Note <span class="text-muted">(optional)</span></label>
+            <input class="form-control" id="inspNote" name="note" maxlength="500" placeholder="What was seen, action taken">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="inspBy">Recorded by</label>
+            <input class="form-control" id="inspBy" name="recorded_by" maxlength="80" placeholder="Officer name">
+          </div>
+          <button class="btn btn-primary" type="submit">Save outcome</button>
+        </form>
+      </div>
+      {% if inspections %}
+      <ul class="list-group list-group-flush">
+        {% for i in inspections %}
+        <li class="list-group-item small">
+          <span class="fw-semibold">{{ i.outcome_label }}</span>
+          <span class="text-muted">· {{ i.recorded_at.strftime('%-d %b %Y') }}{% if i.recorded_by %} · {{ i.recorded_by }}{% endif %}</span>
+          {% if i.note %}<div class="text-muted">{{ i.note }}</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
   </div>
   <div class="col-12 col-lg-8">
     <div class="card h-100">

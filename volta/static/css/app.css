@@ -141,3 +141,10 @@ h1, h2, h3, h4, h5, h6 { color: var(--nedco-navy); }
 .signals .signal-info { border-left: 4px solid var(--nedco-sky); }
 .purchases-scroll { max-height: 420px; overflow-y: auto; }
 .breadcrumb-item + .breadcrumb-item::before { color: var(--ink-muted); }
+
+/* ---------- Watch list ---------- */
+.signal-badge { font-weight: 500; }
+.signal-badge-dormant { background: #fdf1d6; color: #8a5a00; }
+.signal-badge-inactive { background: var(--plane); color: var(--ink-2); }
+.signal-badge-drop { background: #f9e0dc; color: var(--nedco-red); }
+.signal-badge-low { background: #e8f1f9; color: var(--nedco-blue-dark); }

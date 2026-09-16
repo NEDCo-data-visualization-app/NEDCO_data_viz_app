@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Watch list · NEDCo Customer Dashboard{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-1">
+  <div>
+    <h1 class="h4 mb-1">Watch list</h1>
+    <p class="text-muted small mb-0">Meters whose purchase pattern suggests a visit, ranked by score. Indicators, not evidence.</p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard.watchlist_csv', **request.args) }}">Download list (CSV)</a>
+</div>
+
+<div class="row g-3 my-2">
+  <div class="col-6 col-lg-2"><div class="card stat-tile"><div class="card-body py-3"><div class="stat-label">Meters flagged</div><div class="stat-value tabular">{{ "{:,}".format(summary.flagged) }}</div><div class="stat-sub">of {{ "{:,}".format(summary.meters) }} meters</div></div></div></div>
+  <div class="col-6 col-lg-2"><div class="card stat-tile"><div class="card-body py-3"><div class="stat-label">No recent purchases</div><div class="stat-value tabular">{{ "{:,}".format(summary.dormant) }}</div><div class="stat-sub">silent 4 to 12 months</div></div></div></div>
+  <div class="col-6 col-lg-2"><div class="card stat-tile"><div class="card-body py-3"><div class="stat-label">Consumption drop</div><div class="stat-value tabular">{{ "{:,}".format(summary.drop) }}</div><div class="stat-sub">under half of a year ago</div></div></div></div>
+  <div class="col-6 col-lg-2"><div class="card stat-tile"><div class="card-body py-3"><div class="stat-label">Low versus peers</div><div class="stat-value tabular">{{ "{:,}".format(summary.low) }}</div><div class="stat-sub">under 30% of the median</div></div></div></div>
+  <div class="col-6 col-lg-2"><div class="card stat-tile"><div class="card-body py-3"><div class="stat-label">Inactive over a year</div><div class="stat-value tabular">{{ "{:,}".format(summary.inactive) }}</div><div class="stat-sub">probably left</div></div></div></div>
+  <div class="col-6 col-lg-2"><div class="card stat-tile"><div class="card-body py-3"><div class="stat-label">Inspected</div><div class="stat-value tabular">{{ "{:,}".format(summary.inspected) }}</div><div class="stat-sub">meters with an outcome</div></div></div></div>
+</div>
+
+<form method="get" class="card filter-bar mb-3">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-3 col-xl-2">
+        <label class="form-label" for="wlUtility">District</label>
+        <select class="form-select" id="wlUtility" name="utility">
+          <option value="">All</option>
+          {% for d in districts %}<option value="{{ d }}" {{ 'selected' if filters.utility == d }}>{{ d }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-xl-2">
+        <label class="form-label" for="wlTariff">Account type</label>
+        <select class="form-select" id="wlTariff" name="tariff_type">
+          <option value="">All</option>
+          {% for t in tariffs %}<option value="{{ t }}" {{ 'selected' if filters.tariff_type == t }}>{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-xl-2">
+        <label class="form-label" for="wlSignal">Signal</label>
+        <select class="form-select" id="wlSignal" name="signal">
+          <option value="">Any</option>
+          {% for key, label in signal_labels.items() %}<option value="{{ key }}" {{ 'selected' if filters.signal == key }}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-xl-2">
+        <label class="form-label" for="wlInspected">Inspection</label>
+        <select class="form-select" id="wlInspected" name="inspected">
+          <option value="">All</option>
+          <option value="no" {{ 'selected' if filters.inspected == 'no' }}>Not yet inspected</option>
+          <option value="yes" {{ 'selected' if filters.inspected == 'yes' }}>Inspected</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-xl-2">
+        <label class="form-label" for="wlSort">Sort by</label>
+        <select class="form-select" id="wlSort" name="sort">
+          <option value="score" {{ 'selected' if sort == 'score' }}>Score</option>
+          <option value="shortfall" {{ 'selected' if sort == 'shortfall' }}>kWh below expected</option>
+          <option value="last_purchase" {{ 'selected' if sort == 'last_purchase' }}>Longest since a purchase</option>
+        </select>
+      </div>
+      <div class="col-12 col-xl-auto ms-xl-auto d-flex gap-2">
+        <button class="btn btn-primary px-4" type="submit">Apply</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('dashboard.watchlist') }}">Reset</a>
+      </div>
+    </div>
+  </div>
+</form>
+
+<div class="card">
+  <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+    <span>{{ "{:,}".format(result.total) }} meter{{ '' if result.total == 1 else 's' }} <span class="text-muted small fw-normal">page {{ page }} of {{ pages }} · data through {{ summary.data_end.strftime('%-d %b %Y') if summary.data_end else '—' }}</span></span>
+    <span class="text-muted small">Score: no recent purchases 3 · consumption drop 2 · low versus peers 2 · inactive over a year 1</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0 lookup-table">
+      <thead class="table-light">
+        <tr>
+          <th scope="col">Meter number</th>
+          <th scope="col">District</th>
+          <th scope="col">Account type</th>
+          <th scope="col">Signals</th>
+          <th scope="col" class="text-end">Score</th>
+          <th scope="col" class="text-end">kWh last 12 m</th>
+          <th scope="col" class="text-end">vs prior 12 m</th>
+          <th scope="col" class="text-end">vs peers</th>
+          <th scope="col" class="text-end">kWh below expected</th>
+          <th scope="col">Last purchase</th>
+          <th scope="col">Inspection</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in result.rows %}
+        <tr>
+          <td class="text-nowrap"><a class="fw-semibold" href="{{ url_for('dashboard.customer', meterid=r.meterid) }}">{{ r.meterid }}</a></td>
+          <td>{{ r.utility or '—' }}</td>
+          <td>{{ r.tariff_type or '—' }}</td>
+          <td>{% for s in r.signals %}<span class="badge rounded-pill signal-badge signal-badge-{{ s }}">{{ signal_labels[s] }}</span> {% endfor %}</td>
+          <td class="text-end tabular fw-semibold">{{ r.score }}</td>
+          <td class="text-end tabular">{{ r.kwh_12|full(0) }}</td>
+          <td class="text-end tabular">{{ "{:+.0f}%".format(r.change_pct) if r.change_pct is not none else '—' }}</td>
+          <td class="text-end tabular">{{ "{:.0f}%".format(r.peer_pct) if r.peer_pct is not none else '—' }}</td>
+          <td class="text-end tabular">{{ r.shortfall_kwh|full(0) }}</td>
+          <td class="text-nowrap">{{ r.last_purchase.strftime('%-d %b %Y') }} <span class="text-muted small">({{ r.months_since }} mo)</span></td>
+          <td class="text-nowrap small">{% if r.inspection_outcome %}{{ r.outcome_label }}<br><span class="text-muted">{{ r.inspection_at.strftime('%-d %b %Y') }}{% if r.inspection_by %} · {{ r.inspection_by }}{% endif %}</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="11" class="text-center text-muted py-4">No meters match these filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <div class="card-footer d-flex justify-content-between align-items-center">
+    {% set args = request.args.to_dict() %}
+    {% if page > 1 %}{% set _ = args.update({'page': page - 1}) %}<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard.watchlist', **args) }}">Previous</a>{% else %}<span></span>{% endif %}
+    <span class="text-muted small">Page {{ page }} of {{ pages }}</span>
+    {% if page < pages %}{% set _ = args.update({'page': page + 1}) %}<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard.watchlist', **args) }}">Next</a>{% else %}<span></span>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
