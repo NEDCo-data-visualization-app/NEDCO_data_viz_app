@@ -5,6 +5,7 @@ from __future__ import annotations
 from flask import abort, current_app, redirect, render_template, request, url_for
 
 from ...services.customers import search_customers, customer_account
+from ...services.watchlist import OUTCOMES, inspections_for
 from ..auth import effective_public_mode
 from . import bp, get_datastore
 
@@ -40,4 +41,5 @@ def customer(meterid: str):
     if account is None:
         abort(404)
     metrics = current_app.extensions["metrics"]
-    return render_template("customer.html", a=account, metric_labels=metrics.mapping)
+    return render_template("customer.html", a=account, metric_labels=metrics.mapping,
+                           inspections=inspections_for(datastore, meterid), outcomes=OUTCOMES)
