@@ -67,6 +67,7 @@ def create_app(config_object: Optional[Union[str, Mapping[str, Any], type]] = No
         signed_in = is_authenticated()
         return {
             "is_public": effective_public_mode(),
+            "show_forecasts": bool(app.config.get("SHOW_FORECASTS", False)),
             "admin_token_required": bool(app.config.get("ADMIN_TOKEN")),
             "show_logout": gate and signed_in,
             "login_gate_active": gate and not signed_in,

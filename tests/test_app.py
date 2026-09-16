@@ -51,7 +51,7 @@ def _make_app(tmp_path, with_data=True, public=False):
         con.close()
     app = create_app(
         {"DB_PATH": str(db), "PARQUET_PATH": TABLE, "PUBLIC_MODE": public, "UPLOADS_DIR": str(tmp_path / "uploads"),
-         "MODEL_DIR": str(ROOT / "models"), "TESTING": True}
+         "MODEL_DIR": str(ROOT / "models"), "TESTING": True, "SHOW_FORECASTS": True}
     )
     return app
 
@@ -689,3 +689,22 @@ def test_pptx_export_public_view_and_empty_selection(tmp_path):
     (tmp_path / "e").mkdir()
     no_data = _make_app(tmp_path / "e", with_data=False).test_client()
     assert no_data.get("/export/pptx").status_code == 200
+
+
+def test_forecasts_hidden_unless_enabled(tmp_path):
+    db = tmp_path / "warehouse.duckdb"
+    con = duckdb.connect(str(db))
+    con.register("df", pd.DataFrame(_synthetic_rows(n_meters=3)))
+    con.execute(f"CREATE TABLE {TABLE} AS SELECT * EXCLUDE (od_date), od_date::DATE AS od_date FROM df")
+    con.close()
+    base = {"DB_PATH": str(db), "PARQUET_PATH": TABLE, "UPLOADS_DIR": str(tmp_path / "u"), "MODEL_DIR": str(ROOT / "models"), "TESTING": True}
+    hidden = create_app(base).test_client()  # SHOW_FORECASTS defaults to off
+    page = hidden.get("/").get_data(as_text=True)
+    assert "Forecasts" not in page and "/predictions" not in page
+    assert hidden.get("/predictions").status_code == 404
+    assert hidden.get("/predictions/private").status_code == 404
+    assert hidden.post("/predictions/api/predict-all", json={}).status_code == 404
+    assert hidden.get("/health").status_code == 200
+    shown = create_app({**base, "SHOW_FORECASTS": True}).test_client()
+    assert "Forecasts" in shown.get("/").get_data(as_text=True)
+    assert shown.get("/predictions").status_code == 200
